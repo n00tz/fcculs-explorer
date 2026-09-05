@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.env
+node_modules/
+dist/
+build/
+.svelte-kit/
+*.dat
+*.zip
+!ingestor/tests/fixtures/*.zip
+.DS_Store

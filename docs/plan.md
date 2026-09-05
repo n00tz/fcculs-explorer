@@ -1,0 +1,187 @@
+# FCC ULS Explorer & Alerting Service — Implementation Plan
+
+## 1. Problem Statement
+
+Build a self-hostable, OCI-container-deployable web application that ingests FCC
+public data — the **ULS Amateur Radio Service** database (`l_amat` complete +
+daily/weekly transaction files) and the **Antenna Structure Registration (ASR /
+"Tower")** database (complete + daily/weekly transaction files) — into a queryable
+store, and exposes:
+
+- A fast, modern web UI to browse and search Towers and Amateur Radio licenses.
+- "Identity grouping" views that surface related records (same FRN/licensee,
+  same tower site/coordinates, same trustee/club relationship, license history)
+  so a user can discover the full picture behind a callsign, licensee, or structure.
+- Free-text search by callsign or ULS System ID / File Number, with full change
+  history.
+- User-managed "Watches" on a callsign or ULS ID that trigger alerts (email,
+  SMS via free/open channels, or generic webhook) when the daily transaction
+  feed shows a change to that identity.
+
+Target deployment: a single Podman host, **rootless containers**, driven by a
+`docker-compose`/`podman-compose`-compatible stack. No proprietary/paid
+integrations required for core function (email-to-SMS gateways, ntfy,
+Discord/Telegram/Matrix webhooks cover "text" alerts without a paid SMS API).
+No rich admin/data-editing UI in v1 — data is read-only, sourced solely from FCC files.
+
+## 2. Confirmed Decisions (from user)
+
+- **Hosting**: rootless Podman host; stack must run as a Compose file Podman
+  can consume (`podman-compose` or `podman compose`), all containers running
+  as non-root, no privileged low ports required.
+- **Database**: PostgreSQL.
+- **Email delivery**: self-hosted/BYO SMTP relay (no third-party API key
+  dependency).
+- **SMS/text approach**: pluggable notification backend — support email-to-SMS
+  carrier gateways *and* generic webhooks (ntfy/Discord/Telegram/Matrix etc.),
+  user chooses per-watch.
+- **v1 data scope**: Amateur Radio service + ASR Tower data only. Other ULS
+  services (commercial, GMRS, etc.) deferred to a later phase.
+- **Backend/frontend framework**: no strong preference — proposed below,
+  optimized for container simplicity on a single host and low ongoing
+  maintenance.
+
+## 3. Proposed Stack
+
+| Concern | Choice | Rationale |
+|---|---|---|
+| Ingestion/API backend | **Python 3.12 + FastAPI** | Strong text/file parsing ecosystem, async I/O for downloads, easy OpenAPI docs, good Postgres tooling (SQLAlchemy 2.0 / asyncpg) |
+| Database | **PostgreSQL 16** | Native trigram (`pg_trgm`) + full-text search for callsign/name search; JSONB for flexible historical diffs; mature, FOSS |
+| Cache/queue | **Redis 7** + **RQ** (Redis Queue) | Lightweight FOSS job queue for notification dispatch, decoupled from ingestion cron; avoids pulling in Celery's complexity |
+| Scheduler | **APScheduler** inside a dedicated `ingestor` container (or host `podman` timer/systemd unit) | Simple cron-like daily/weekly pulls, no extra service needed |
+| Frontend | **SvelteKit** (static adapter) built to static assets | Small bundle, fast first paint, compiles away framework overhead — fits "modern fast interface" goal |
+| Web/reverse proxy | **Caddy** | Automatic TLS, serves SvelteKit static build, reverse-proxies `/api` to FastAPI, trivially rootless-friendly (binds high ports, remapped by Podman) |
+| Notifications | SMTP (`aiosmtplib`) for email + email-to-SMS gateway table; generic HTTP webhook sender; native ntfy/Discord/Telegram/Matrix adapters as webhook presets | All FOSS-compatible, no mandatory paid API |
+| Auth (watch management) | Passwordless **magic-link email** sessions (no password storage, minimal surface) | Avoids building/maintaining a full auth system for a read-mostly app |
+| Container base images | `python:3.12-slim`, `node:22-slim` (build stage only), `postgres:16-alpine`, `redis:7-alpine`, `caddy:2-alpine` | Small, well-maintained, rootless-compatible |
+
+All app containers run as a non-root `USER` in their Dockerfile; Postgres/Redis
+official images already support rootless/arbitrary UID operation.
+
+## 4. Data Ingestion Design
+
+FCC publishes, per service, a **complete weekly database dump** and **daily
+transaction files**, all as ZIP archives of pipe-delimited fixed-schema `.dat`
+files (layout defined in FCC's `public_access_database_definitions` spec).
+This plan designs ingestion fresh against that current spec rather than
+porting old code, since file formats, URLs, and hosting have had 8+ years to
+drift.
+
+- **Amateur Radio (`l_amat`)**: `HD` (header), `EN` (entity/licensee), `AM`
+  (amateur-specific: class, group, trustee callsign for clubs), `HS` (license
+  history), `SC`/`SF` (special conditions, free-form), `CO` (comments), `LA`
+  (attachments).
+- **ASR / Tower (`r_tower`)**: `EN` (owner/entity), `RA` (registration —
+  coordinates, height, structure type, FAA study, construction/dismantle
+  dates), `CO` (antenna coordinates array), `HS` (history), `RE`/`SC`
+  (remarks) — same delimited-file convention, different schema.
+
+> Note: the user has an old archived personal project
+> (`n00tz/FCCULS-mysql`) that loaded these same two datasets into MySQL. It
+> was purely a workaround for a slow FCC website ~8 years ago and is treated
+> here only as informal historical context — its schema/URLs/scripts are
+> **not** assumed accurate and will not be ported or relied upon; the
+> `research-fcc-schema` todo below independently verifies current file
+> layouts and download endpoints against FCC's live documentation.
+
+### Ingestion pipeline (`ingestor` service)
+
+1. **Bootstrap load**: download the latest complete dump for each service,
+   parse into a Postgres staging schema, then bulk-load into the normalized
+   tables via `COPY`.
+2. **Daily delta job**: download the daily transaction file, parse each
+   present record type, **diff against the currently stored row**, upsert,
+   and write a `change_events` row per changed field. This change-event log
+   is the trigger source for alerts.
+3. Idempotent by design: re-running a day's file is safe (upsert by natural
+   key: `unique_system_identifier` / `callsign` / `registration_number`;
+   diff against current stored state, not against the previous file).
+4. Parsing/schema implemented against FCC's current field-position spec,
+   verified at build time, unit-tested with small fixture `.dat` snippets
+   checked into the repo (not full downloads).
+5. Optionally enrich records with a public zip→city/state/lat-long/timezone/
+   population dataset (freely available, e.g. GeoNames) for map views and
+   location-based grouping — evaluated during schema design, not assumed.
+
+## 5. Data Model (high level)
+
+- `entities` — FRN, name, address, entity type — the anchor for grouping.
+- `amateur_licenses` — callsign, class, group code, status, grant/expiration
+  dates, trustee callsign (for club stations), FK → `entities`.
+- `license_history` — HS-derived audit trail per callsign.
+- `towers` — ASR registration number, coordinates, height, structure type,
+  status, FK → owning `entities`.
+- `tower_filings` — history of tower record changes.
+- `change_events` — polymorphic diff log (`subject_type`, `subject_id`,
+  `field`, `old_value`, `new_value`, `effective_date`, `source_file`).
+- `identity_groups` (materialized view / computed) — links `entities` sharing
+  an FRN, licensees sharing a mailing address, and towers sharing
+  coordinates/site — surfaced as "related records" on detail pages.
+- `watches` — user_id, subject_type (`callsign`|`uls_id`), subject_value,
+  notification_channel_id(s).
+- `notification_channels` — type (`smtp`, `email_to_sms`, `webhook`,
+  `ntfy`/`discord`/`telegram`/`matrix` preset), config JSONB.
+- `users` / `magic_link_tokens` — minimal passwordless auth.
+
+## 6. Application Features (v1)
+
+- **Search**: callsign or ULS ID / ASR registration lookup with typeahead
+  (Postgres trigram index), fallback fuzzy name search.
+- **Browse**: paginated/filterable lists for Amateur licenses and Towers
+  (by state, status, class, etc.).
+- **Detail pages**: full attribute view per callsign/tower + timeline of
+  `change_events` + "related identities" panel (grouped by FRN/address/site).
+- **Watch management**: authenticated (magic-link) page to create/manage
+  watches and notification channels; test-send button per channel.
+- **Alert dispatch**: `notifier` worker consumes `change_events` matching
+  active watches, renders a templated message, and enqueues delivery jobs
+  in Redis/RQ, with retry/backoff.
+
+## 7. Deployment Layout (Podman/Compose)
+
+Services: `caddy`, `web` (SvelteKit static build output, served by Caddy —
+no separate container needed at runtime), `api` (FastAPI), `ingestor`
+(scheduled job container), `notifier` (RQ worker), `redis`, `postgres`.
+All on one internal Compose network; only `caddy` publishes host ports.
+Config via `.env` + Compose `secrets` for SMTP creds/DB password. Named
+volumes for Postgres data and Redis persistence (if enabled). A
+`compose.yaml` at repo root, verified against `podman-compose` and rootless
+`podman compose` (Podman ≥ 4.x has native Compose support).
+
+## 8. Open Items / Assumptions to Revisit During Build
+
+- Exact FCC field-position layouts will be pulled from the current
+  `public_access_database_definitions.pdf` at build time (schema is stable
+  but should be verified per-service before writing parsers).
+- Magic-link auth is proposed as the lightest-weight option for watch
+  management; can be swapped for OAuth/passkeys later without affecting
+  ingestion/data layers.
+- Rate/volume of FCC daily files is modest (10s of MB); no need for
+  distributed processing — single ingestor container is sufficient at this
+  scale.
+
+## 9. Todos (tracked in SQL `todos` table)
+
+1. `research-fcc-schema` — Pull current FCC public-access database definitions
+   for ULS Amateur and ASR Tower files; document exact field layouts for HD/EN/AM/HS
+   and ASR equivalents, and verify current download URLs (site structure may
+   have changed since any older personal projects).
+2. `design-db-schema` — Finalize Postgres schema (entities, licenses, towers,
+   history, change_events, identity_groups, watches, notification_channels).
+3. `build-ingestor` — Implement FCC file downloader + pipe-delimited parser
+   + diff-before-upsert + change-event generation, with unit test fixtures.
+4. `build-api` — FastAPI service: search, browse, detail, identity-grouping,
+   watch CRUD, notification-channel CRUD endpoints.
+5. `build-notifier` — RQ worker + SMTP sender + webhook sender + email-to-SMS
+   gateway templates + ntfy/Discord/Telegram/Matrix presets.
+6. `build-frontend` — SvelteKit UI: search, browse, detail/timeline pages,
+   watch management, magic-link auth flow.
+7. `build-auth` — Passwordless magic-link auth (token issuance via email,
+   session cookies).
+8. `containerize` — Write rootless-friendly Dockerfiles for each service.
+9. `compose-stack` — Author `compose.yaml`, `.env.example`, volumes/secrets,
+   validate under rootless `podman compose`.
+10. `docs` — README covering deployment, configuration, and FCC data licensing/attribution notes.
+
+Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
+6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8.
