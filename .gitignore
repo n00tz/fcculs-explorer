@@ -7,6 +7,7 @@ dist/
 build/
 .svelte-kit/
 *.dat
+!ingestor/tests/fixtures/*.dat
 *.zip
 !ingestor/tests/fixtures/*.zip
 .DS_Store
