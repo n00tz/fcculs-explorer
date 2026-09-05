@@ -1,0 +1,16 @@
+:8080 {
+	encode gzip
+
+	# Reverse-proxy API calls to the api service (Compose network DNS name).
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Static SvelteKit SPA build; try_files falls back to index.html for any
+	# route SvelteKit didn't statically prerender (client-side routing).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
