@@ -224,12 +224,38 @@ live status):
   ntfy/Discord/Telegram/Matrix presets built on the webhook sender).
   Integration-tested end-to-end with real Postgres + Redis + RQ worker +
   a local HTTP capture server, including idempotency-on-rerun.
-- ⏳ `build-frontend` — pending/in progress. SvelteKit UI: search, browse,
-  detail/timeline pages, watch management, magic-link auth flow.
-- ⏳ `containerize` — pending. Rootless Dockerfiles per service.
-- ⏳ `compose-stack` — pending. `compose.yaml` + `.env.example`, validated
-  under rootless `podman compose`.
-- ⏳ `docs` — pending. README covering deployment/config/data licensing.
+- ✅ `build-frontend` — done. `web/` SvelteKit static SPA (adapter-static,
+  `ssr=false`/`prerender=false` since routes are dynamic and there's no
+  Node server at runtime): search, browse, detail/identity/timeline pages
+  for both Amateur and Tower data, magic-link login flow, and full
+  watch/channel management UI. Built and smoke-tested in a `node:22-slim`
+  container on the remote host (no local Node available either).
+- ✅ `containerize` — done. Non-root Dockerfiles for `api`, `ingestor`,
+  `notifier` (`python:3.12-slim`) and a multi-stage `web` build
+  (`node:22-slim` → `caddy:2-alpine`, serving the static SPA and
+  reverse-proxying `/api/*`). `ingestor/scheduler.py` added as the
+  APScheduler-driven daily/bootstrap entrypoint. All four images built and
+  smoke-tested in a disposable Podman pod (`deploy/smoke_test.sh`) with
+  real Postgres/Redis; a bridge-network test confirmed Caddy resolves the
+  `api` service by Compose-style DNS name and correctly proxies routes.
+  Found and fixed a real bug: `COPY` preserved restrictive host directory
+  permissions (700) from the build context, making the app unreadable to
+  the non-root runtime user — fixed with `chmod -R a+rX` before `USER`.
+- ✅ `compose-stack` — done. Root `compose.yaml` + `.env.example`: postgres,
+  redis, a one-shot idempotent `migrate` job, api, ingestor,
+  `notifier-worker`/`notifier-dispatch` (one image, two roles via
+  different commands), and web (only port-published service). Verified on
+  the remote host — no Compose provider was preinstalled, so the
+  standalone `docker-compose` v2 binary was installed per-user into
+  `~/.docker/cli-plugins` and `podman.socket` started; a full
+  `podman compose up -d --build` brought up all 7 containers, `migrate`
+  applied all 4 SQL files and exited 0, and a live end-to-end HTTP request
+  (curl → Caddy → reverse-proxied `/api/search` → FastAPI → Postgres)
+  returned a valid 200 JSON response. Torn down cleanly afterward.
+- ✅ `docs` — done. `README.md` rewritten with deployment steps, a full
+  `.env` configuration reference table, first-time bootstrap-load
+  instructions, verification steps, testing methodology, and FCC data
+  licensing/attribution notes.
 
 **Testing methodology established across all services**: since the local
 Windows dev machine has no Python/container runtime, all real testing runs
