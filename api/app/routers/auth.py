@@ -48,7 +48,7 @@ async def request_link(body: RequestLinkBody, conn: AsyncConnection = Depends(ge
         )
     await conn.commit()
 
-    link_url = f"{settings.magic_link_base_url}/api/auth/verify?token={raw_token}"
+    link_url = f"{settings.magic_link_base_url}/auth/callback?token={raw_token}"
     await send_magic_link_email(email, link_url)
 
     return {"detail": "If that email is valid, a sign-in link has been sent."}
