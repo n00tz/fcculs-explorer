@@ -1,0 +1,137 @@
+# FCC ULS Explorer & Alerting Service -- Compose stack
+#
+# Designed for rootless Podman (`podman compose up -d` or `podman-compose up -d`).
+# All application containers run as non-root users inside their own image
+# (see each Dockerfile); rootless Podman itself never uses host-root
+# privileges regardless. Only `web` publishes a host port.
+#
+# Copy .env.example to .env and fill in real secrets before deploying.
+
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fcculs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-fcculs}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fcculs} -d ${POSTGRES_DB:-fcculs}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: docker.io/library/postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-fcculs}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PGDATABASE: ${POSTGRES_DB:-fcculs}
+    volumes:
+      - ./db:/migrations:ro,Z
+    entrypoint: ["/bin/sh", "-c"]
+    # Applies every migration in order every startup; all migrations use
+    # CREATE ... IF NOT EXISTS / idempotent DDL so this is safe to re-run.
+    command:
+      - |
+        set -e
+        for f in /migrations/*.sql; do
+          echo "applying $$f"
+          psql -v ON_ERROR_STOP=1 -f "$$f"
+        done
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      FCCULS_DATABASE_URL: postgresql://${POSTGRES_USER:-fcculs}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fcculs}
+      FCCULS_SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      FCCULS_MAGIC_LINK_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      FCCULS_SMTP_HOST: ${SMTP_HOST:-localhost}
+      FCCULS_SMTP_PORT: ${SMTP_PORT:-587}
+      FCCULS_SMTP_USER: ${SMTP_USER:-}
+      FCCULS_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      FCCULS_SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      FCCULS_SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-no-reply@fcculs-explorer.example}
+
+  ingestor:
+    build: ./ingestor
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      FCCULS_DATABASE_URL: postgresql://${POSTGRES_USER:-fcculs}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fcculs}
+      FCCULS_INGEST_CRON_HOUR: ${INGEST_CRON_HOUR:-7}
+      FCCULS_INGEST_CRON_MINUTE: ${INGEST_CRON_MINUTE:-0}
+    # Default CMD (see Dockerfile) runs the APScheduler daily-cron process.
+    # For the very first deployment, run a one-off bootstrap load instead:
+    #   podman compose run --rm ingestor python scheduler.py --bootstrap
+
+  notifier-worker:
+    build: ./notifier
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment: &notifier_env
+      FCCULS_DATABASE_URL: postgresql://${POSTGRES_USER:-fcculs}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fcculs}
+      FCCULS_REDIS_URL: redis://redis:6379/0
+      FCCULS_SMTP_HOST: ${SMTP_HOST:-localhost}
+      FCCULS_SMTP_PORT: ${SMTP_PORT:-587}
+      FCCULS_SMTP_USER: ${SMTP_USER:-}
+      FCCULS_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      FCCULS_SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      FCCULS_SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-no-reply@fcculs-explorer.example}
+      FCCULS_MAX_DELIVERY_ATTEMPTS: ${MAX_DELIVERY_ATTEMPTS:-5}
+    # Default CMD (see Dockerfile): python -m app.worker (RQ worker, consumes
+    # delivery jobs enqueued by notifier-dispatch below).
+
+  notifier-dispatch:
+    build: ./notifier
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment: *notifier_env
+    # Same image as notifier-worker, different role: polls change_events for
+    # new matches against active watches and enqueues delivery jobs, then
+    # sleeps. No separate process supervisor needed for a two-role image.
+    command: ["/bin/sh", "-c", "while true; do python -m app.dispatch; sleep ${DISPATCH_INTERVAL_SECONDS:-60}; done"]
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${PUBLISHED_PORT:-8080}:8080"
+
+volumes:
+  pgdata:
+  redisdata:
