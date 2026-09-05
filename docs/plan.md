@@ -185,3 +185,59 @@ volumes for Postgres data and Redis persistence (if enabled). A
 
 Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
 6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8.
+
+## 10. Progress Log
+
+Status as of 2026-09-05 (updated as work proceeds; see SQL `todos` table for
+live status):
+
+- ✅ `research-fcc-schema` — done. Verified real download host
+  (`data.fcc.gov`, not `www.fcc.gov`) and exact field layouts against real
+  downloaded sample files, catching and documenting several third-party-doc
+  errors (see `docs/fcc-data-reference.md`), most notably a missing
+  `content_indicator` field across all three Tower record types.
+- ✅ `design-db-schema` — done. `db/001_app_tables.sql` (app-level: users,
+  magic link tokens, watches, notification channels/deliveries,
+  change_events), `db/002_fcc_raw_tables.sql` (corrected raw FCC tables),
+  `db/003_identity_grouping_views.sql` (FRN/site/address grouping
+  materialized views), `db/004_notifier_constraints.sql` (dedupe
+  constraint). Validated end-to-end against real Postgres 16 with real
+  fixture data.
+- ✅ `build-ingestor` — done. `ingestor/` (parser, differ, downloader, db
+  upsert, orchestration). Integration-tested end-to-end against a live
+  Postgres container: bootstrap load + simulated daily change produced
+  exactly the expected `change_events` row. Fixed a real type-mismatch bug
+  in `differ.py` (DB-typed values vs. parser's raw strings) during testing.
+- ✅ `build-api` — done. `api/` FastAPI service: unified trigram search,
+  Amateur/Tower browse + detail (with identity-grouping panels), identity
+  lookup by FRN/address. Integration-tested against real Postgres.
+- ✅ `build-auth` — done (built alongside `build-api` since watch/channel
+  endpoints require it). Passwordless magic-link auth: `api/app/security.py`
+  (single-use hashed tokens, signed session cookies via itsdangerous),
+  `api/app/mailer.py` (SMTP relay), full request-link → verify → session →
+  logout flow integration-tested, including single-use enforcement and
+  401-on-unauthenticated checks.
+- ✅ `build-notifier` — done. `notifier/` RQ-based dispatch pipeline:
+  `matcher.py` (idempotent change_event → active watch matching, backed by
+  a new unique constraint), `jobs.py` (per-delivery send + status tracking),
+  `senders/` (SMTP, generic webhook, email-to-SMS carrier gateways, and
+  ntfy/Discord/Telegram/Matrix presets built on the webhook sender).
+  Integration-tested end-to-end with real Postgres + Redis + RQ worker +
+  a local HTTP capture server, including idempotency-on-rerun.
+- ⏳ `build-frontend` — pending/in progress. SvelteKit UI: search, browse,
+  detail/timeline pages, watch management, magic-link auth flow.
+- ⏳ `containerize` — pending. Rootless Dockerfiles per service.
+- ⏳ `compose-stack` — pending. `compose.yaml` + `.env.example`, validated
+  under rootless `podman compose`.
+- ⏳ `docs` — pending. README covering deployment/config/data licensing.
+
+**Testing methodology established across all services**: since the local
+Windows dev machine has no Python/container runtime, all real testing runs
+on a remote rootless-Podman host over SSH, using disposable Podman pods
+(Postgres 16 + Redis 7 as needed) with real schema migrations applied and
+either real downloaded FCC fixture data or hand-crafted representative rows
+seeded directly via SQL, exercised through the actual application code
+(not just SQL) before any todo is marked done. Because the rootless Podman
+host doesn't have `loginctl linger` enabled, all pod/container lifecycle
+commands for a given test run are chained into a single SSH invocation.
+
