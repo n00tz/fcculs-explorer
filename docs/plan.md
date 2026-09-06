@@ -423,4 +423,27 @@ commands for a given test run are chained into a single SSH invocation.
   every future pull — confirmed the committed file mode matches the other
   `deploy/*.sh` scripts (644, invoked via `bash deploy/update.sh`, not
   directly).
+- ✅ Decommissioned the `house-voyager` test host (`n00tz@10.64.3.38`). A
+  dedicated VM/user has been provisioned for this project going forward:
+  `fcculs@10.64.3.39`. Full teardown performed and verified on
+  `.38`: stopped and removed all 12 Quadlet units (`bash
+  deploy/uninstall-quadlets.sh --volumes --images`, after fixing CRLF line
+  endings introduced by `scp`-ing from Windows — same recurring gotcha as
+  prior sessions), which removed the `pgdata`/`redisdata` named volumes
+  and untagged the `:latest` app images; additionally force-removed all
+  leftover `:test`/`:<short-sha>` image tags and stray
+  `docker.io/library/fcculs-stack-*` images left over from earlier ad-hoc
+  `podman compose build` runs, ran `podman image prune -f` and `podman
+  volume prune -f` to clear dangling build layers and an orphaned
+  anonymous volume, deleted every leftover `/tmp/fcculs*` /
+  `/tmp/build_ctx` / `/tmp/api_full` checkout directory used during this
+  session's ad-hoc remote testing, reset systemd's stale failed-unit
+  references (`systemctl --user reset-failed`), and disabled lingering
+  (`loginctl disable-linger n00tz`) since it was enabled specifically for
+  this project. Confirmed clean: `podman ps -a`, `podman volume ls`, and
+  `~/.config/containers/systemd/` are all empty of anything
+  fcculs-related; only generic base images (python/node/redis/postgres/
+  caddy) remain cached. **Next step**: re-run the same install/bootstrap/
+  verification flow against the new dedicated host `fcculs@10.64.3.39`
+  before resuming any further feature work there.
 
