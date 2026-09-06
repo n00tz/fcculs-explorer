@@ -256,7 +256,8 @@ just re-run `deploy/install-quadlets.sh`.
 |---|---|---|
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | postgres, migrate, api, ingestor, notifier | Database credentials |
 | `SESSION_SECRET` | api | Signing key for session cookies (**required**, no default) |
-| `PUBLIC_BASE_URL` | api | Base URL used to build magic-link emails |
+| `PUBLIC_BASE_URL` | api | **Fallback only.** By default, magic-link emails use the actual Host/X-Forwarded-* headers of the request that triggered them (works automatically behind a reverse proxy or Cloudflare Tunnel); this is used only if `TRUST_REQUEST_HOST=false` or a request has no Host header |
+| `TRUST_REQUEST_HOST` | api | Set to `false` to always use `PUBLIC_BASE_URL` instead of deriving the base URL from request headers (default `true`) |
 | `PUBLISHED_PORT` | web | Host port the Caddy/web container is published on |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_FROM_ADDRESS` | api, notifier | Outbound SMTP relay for magic-links and email/email-to-SMS alerts |
 | `INGEST_CRON_HOUR`, `INGEST_CRON_MINUTE` | ingestor | UTC time of the daily ingest job |

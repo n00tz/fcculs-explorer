@@ -9,9 +9,10 @@ Flow:
 3. POST /auth/logout -- clears the session cookie.
 4. GET /auth/me -- returns the current user, or 401.
 """
+import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel, EmailStr
 
@@ -24,12 +25,42 @@ from ..security import create_session_cookie, generate_magic_link_token, hash_to
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def resolve_base_url(request: Request) -> str:
+    """Determine the public base URL to use in magic-link emails/cookies.
+
+    By default, derive it from the incoming request's Host (preferring
+    X-Forwarded-Host, set by a reverse proxy in front of Caddy) and scheme
+    (X-Forwarded-Proto, or Cloudflare Tunnel's Cf-Visitor header, or the
+    request's own scheme as a last resort) -- so links are correct no
+    matter what public hostname/tunnel domain fronts the app, without
+    requiring settings.magic_link_base_url to be kept in sync with it.
+    Falls back to the static settings.magic_link_base_url if
+    trust_request_host is disabled or no Host header is present at all.
+    """
+    if settings.trust_request_host:
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        if host:
+            proto = request.headers.get("x-forwarded-proto")
+            if not proto:
+                cf_visitor = request.headers.get("cf-visitor")
+                if cf_visitor:
+                    try:
+                        proto = json.loads(cf_visitor).get("scheme")
+                    except (ValueError, AttributeError):
+                        proto = None
+            proto = proto or request.url.scheme
+            return f"{proto}://{host}"
+    return settings.magic_link_base_url
+
+
 class RequestLinkBody(BaseModel):
     email: EmailStr
 
 
 @router.post("/request-link", status_code=status.HTTP_202_ACCEPTED)
-async def request_link(body: RequestLinkBody, conn: AsyncConnection = Depends(get_db)):
+async def request_link(
+    request: Request, body: RequestLinkBody, conn: AsyncConnection = Depends(get_db)
+):
     email = body.email.lower()
     async with conn.cursor() as cur:
         await cur.execute("SELECT id FROM users WHERE email = %s", (email,))
@@ -48,14 +79,17 @@ async def request_link(body: RequestLinkBody, conn: AsyncConnection = Depends(ge
         )
     await conn.commit()
 
-    link_url = f"{settings.magic_link_base_url}/auth/callback?token={raw_token}"
+    base_url = resolve_base_url(request)
+    link_url = f"{base_url}/auth/callback?token={raw_token}"
     await send_magic_link_email(email, link_url)
 
     return {"detail": "If that email is valid, a sign-in link has been sent."}
 
 
 @router.get("/verify")
-async def verify(token: str, response: Response, conn: AsyncConnection = Depends(get_db)):
+async def verify(
+    request: Request, token: str, response: Response, conn: AsyncConnection = Depends(get_db)
+):
     token_hash = hash_token(token)
     async with conn.cursor() as cur:
         await cur.execute(
@@ -82,7 +116,7 @@ async def verify(token: str, response: Response, conn: AsyncConnection = Depends
         max_age=settings.session_max_age_seconds,
         httponly=True,
         samesite="lax",
-        secure=settings.magic_link_base_url.startswith("https://"),
+        secure=resolve_base_url(request).startswith("https://"),
     )
     return {"detail": "Signed in"}
 
