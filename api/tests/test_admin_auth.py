@@ -46,7 +46,14 @@ def test_admin_session_cookie_roundtrip():
 
 def test_admin_session_cookie_rejects_tampering():
     cookie = create_admin_session_cookie()
-    tampered = cookie[:-1] + ("A" if cookie[-1] != "A" else "B")
+    # Flip a character in the payload segment (before the first ".") rather
+    # than the very last character of the signature: the trailing base64
+    # character of an HMAC digest sometimes encodes unused bits, so it can
+    # occasionally decode to the same bytes when altered, making that
+    # specific position an unreliable place to test tamper-detection.
+    payload, _, rest = cookie.partition(".")
+    tampered_payload = payload[:-1] + ("A" if payload[-1] != "A" else "B")
+    tampered = f"{tampered_payload}.{rest}"
     assert read_admin_session_cookie(tampered) is False
 
 
