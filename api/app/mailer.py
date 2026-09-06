@@ -22,14 +22,24 @@ async def send_magic_link_email(to_address: str, link_url: str) -> None:
         "If you did not request this, you can safely ignore this email."
     )
     try:
-        await aiosmtplib.send(
-            message,
-            hostname=settings.smtp_host,
-            port=settings.smtp_port,
-            username=settings.smtp_user,
-            password=settings.smtp_password,
-            start_tls=settings.smtp_use_tls,
-        )
+        send_kwargs = {
+            "hostname": settings.smtp_host,
+            "port": settings.smtp_port,
+            "start_tls": settings.smtp_use_tls,
+        }
+        # aiosmtplib treats any non-None username as "please AUTH" -- only
+        # pass credentials when a username is actually configured, mirroring
+        # notifier/app/senders/smtp.py's `if settings.smtp_user: client.login(...)`
+        # guard. Without this, an empty-string FCCULS_SMTP_USER (as rendered
+        # by the Quadlet units' Environment=, which always sets the var to a
+        # real -- possibly empty -- string rather than omitting it) causes
+        # aiosmtplib to attempt AUTH against relays that don't support/
+        # advertise it, failing with "The SMTP AUTH extension is not
+        # supported by this server."
+        if settings.smtp_user:
+            send_kwargs["username"] = settings.smtp_user
+            send_kwargs["password"] = settings.smtp_password or ""
+        await aiosmtplib.send(message, **send_kwargs)
     except Exception:
         # Don't leak SMTP errors to the caller (avoids revealing whether an
         # email address exists in the system, and avoids crashing the
