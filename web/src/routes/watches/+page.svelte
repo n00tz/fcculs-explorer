@@ -408,8 +408,14 @@
 							</select>
 						{:else if f.kind === 'checkbox'}
 							<input type="checkbox" bind:checked={fieldValues[f.key]} />
+						{:else if f.kind === 'email'}
+							<input type="email" bind:value={fieldValues[f.key]} placeholder={f.placeholder} />
+						{:else if f.kind === 'tel'}
+							<input type="tel" bind:value={fieldValues[f.key]} placeholder={f.placeholder} />
+						{:else if f.kind === 'url'}
+							<input type="url" bind:value={fieldValues[f.key]} placeholder={f.placeholder} />
 						{:else}
-							<input type={f.kind} bind:value={fieldValues[f.key]} placeholder={f.placeholder} />
+							<input type="text" bind:value={fieldValues[f.key]} placeholder={f.placeholder} />
 						{/if}
 					</label>
 				{/if}
