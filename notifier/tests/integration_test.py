@@ -23,6 +23,7 @@ from rq import Queue, Worker
 
 from app import dispatch
 from app.db import get_connection
+from app.jobs import send_test_message
 
 DSN = os.environ["FCCULS_DATABASE_URL"]
 
@@ -127,6 +128,22 @@ def main():
     assert delivery["attempts"] == 1
     assert delivery["sent_at"] is not None
     print("notification_deliveries row marked sent OK:", dict(delivery))
+
+    # --- send_test_message() marks is_verified even though this call path
+    # never goes through the api's poll-timeout logic at all -- this is
+    # the regression test for the bug found during live production testing
+    # where a real ntfy.sh send took ~11s (longer than the api's former 8s
+    # poll window), so the api reported "timeout" and never told the DB
+    # the send actually succeeded. send_test_message() itself must be the
+    # source of truth for is_verified, not the api's poll result. ---
+    result = send_test_message(channel_id)
+    assert result == {"channel_type": "webhook", "sent": True}, result
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute("SELECT is_verified FROM notification_channels WHERE id = %s", (channel_id,))
+        channel = cur.fetchone()
+    assert channel["is_verified"] is True, channel
+    print("send_test_message() marks is_verified OK")
 
     print("ALL NOTIFIER INTEGRATION CHECKS PASSED")
 

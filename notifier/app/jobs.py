@@ -130,6 +130,19 @@ def send_test_message(channel_id: int) -> dict:
 
         subject, body = render_test_message(row["channel_type"])
         sender(row["config"], subject, body)
+
+        # Set is_verified here (not just in the api's poll-success path) so
+        # a slow external send (e.g. an ntfy.sh/SMTP relay taking longer
+        # than the api's poll timeout -- observed ~11s for a plain ntfy.sh
+        # POST during live testing, longer than the api's former 8s poll
+        # window) still gets recorded as verified once it actually
+        # succeeds, even if the api already gave up and told the user
+        # "timeout". This is the source of truth; the api's poll-success
+        # path is just a fast-path for the common case.
+        with conn.cursor() as cur:
+            cur.execute("UPDATE notification_channels SET is_verified = true WHERE id = %s", (channel_id,))
+        conn.commit()
+
         return {"channel_type": row["channel_type"], "sent": True}
     finally:
         conn.close()

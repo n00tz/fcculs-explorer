@@ -82,7 +82,13 @@ class Settings(BaseSettings):
     # notifier side; see notifier/app/config.py). Rate-limited per-user so
     # this can't be used as a free send-anything relay.
     queue_name: str = "fcculs-notifications"
-    test_send_poll_timeout_seconds: float = 8.0
+    # Real-world external sends (e.g. ntfy.sh, SMTP relays over the public
+    # internet) can take well over 8s from this host under normal network
+    # conditions -- observed ~11s for a plain ntfy.sh POST during live
+    # testing. 20s keeps the endpoint responsive while giving typical
+    # external deliveries enough headroom to land within the poll window
+    # (job_timeout below is still 30s, i.e. always >= this value).
+    test_send_poll_timeout_seconds: float = 20.0
     rate_limit_test_send_max: int = 10
     rate_limit_test_send_window_seconds: int = 60 * 60  # 1 hour
 
