@@ -443,7 +443,37 @@ commands for a given test run are chained into a single SSH invocation.
   this project. Confirmed clean: `podman ps -a`, `podman volume ls`, and
   `~/.config/containers/systemd/` are all empty of anything
   fcculs-related; only generic base images (python/node/redis/postgres/
-  caddy) remain cached. **Next step**: re-run the same install/bootstrap/
-  verification flow against the new dedicated host `fcculs@10.64.3.39`
-  before resuming any further feature work there.
+  caddy) remain cached.
+- ✅ **Production now runs on the new dedicated host**: `fcculs@10.64.3.39`
+  (hostname `trap-ingenuity`), a VM/user set up specifically for this
+  project (not shared with other test work, unlike the retired
+  house-voyager host). The operator had already cloned the repo to
+  `~/fcculs-explorer`, installed the Quadlet units, and brought the stack
+  up independently of this session. Verified the setup directly: all 9
+  Quadlet units (`fcculs-network`, `pgdata-volume`, `redisdata-volume`,
+  `fcculs-postgres`, `fcculs-redis`, `fcculs-migrate`, `fcculs-api`,
+  `fcculs-ingestor`, `fcculs-notifier-worker`, `fcculs-notifier-dispatch`,
+  `fcculs-web`) were `active`, lingering enabled, and the repo was a clean
+  checkout one commit behind `HEAD`. Brought it fully current by running
+  `bash deploy/update.sh`, which pulled the latest commit (`d91caad`),
+  rebuilt all 4 application images tagged `:latest` + `:d91caad` with the
+  `org.opencontainers.image.revision` label set to the full commit hash,
+  and restarted `fcculs-migrate` + every app unit. Confirmed live and
+  fully up to date: all 8 core units `active`, `curl :8080/` → 200,
+  `/api/search?q=W1AW` → 200 with real data, and both of this session's
+  filtering fixes work in production — `/api/amateur?name=Sloan` and
+  `/api/towers?city=atlanta` → 200 with correctly filtered results. This
+  is the first time `deploy/update.sh` has been used for a real
+  production update (not just its initial test run) — worked exactly as
+  designed, including hitting and immediately resolving the by-now-known
+  git working-tree executable-bit nit
+  (`chmod 644 deploy/update.sh` before running, same as the verification
+  run on house-voyager) rather than being surprised by it.
+
+  **Current state**: `fcculs@10.64.3.39` is the live/production host for
+  this project going forward. `10.64.3.38` (house-voyager) has been fully
+  decommissioned for this project (see prior entry). No further todos are
+  pending; future work is operational (monitoring the daily ingestor,
+  applying `deploy/update.sh` after future commits) unless new feature
+  requests come in.
 
