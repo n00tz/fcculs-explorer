@@ -238,6 +238,14 @@ volumes for Postgres data and Redis persistence (if enabled). A
 31. `browse-column-sorting` — Click-to-sort on every currently-displayed
     column in both the Amateur and Tower browse tables, backend
     allow-listed per endpoint to prevent arbitrary-column SQL injection.
+32. `homepage-hero-svg` — Original themed inline SVG hero graphic
+    (broadcast tower + signal arcs + connected identity-cluster nodes),
+    CSS-variable-driven, reduced-motion-aware pulse animation.
+33. `homepage-copy-expansion` — Expand the homepage hero copy and add a
+    3-card feature grid covering browse/search, identity-grouping, and
+    passwordless opt-in notifications.
+34. `homepage-favicon` — Add a themed favicon derived from the same
+    visual motif.
 
 Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
 6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8; 11 depends on 9;
@@ -246,6 +254,7 @@ compose/Quadlet config); 25 depends on 18-24. 26 depends on 4,5 (existing
 watch/notifier pipeline); 27,28 are independent of each other and of 26;
 29 depends on 27 (reuses the same channel-row UI); 30 depends on 26 (needs
 the `frn` subject type) and is best done after 27; 31 is fully independent.
+33 depends on 32 (embeds the hero component); 34 is independent of both.
 
 ## 10. Progress Log
 
@@ -927,6 +936,41 @@ commands for a given test run are chained into a single SSH invocation.
 
   All test artifacts (test user, test channels, test watch) were deleted
   from production afterward.
+
+- ✅ `homepage-hero-svg`, `homepage-copy-expansion`, `homepage-favicon` —
+  all done. Added `web/src/lib/HeroGraphic.svelte`, an original inline
+  SVG (no external assets/licensing concerns) depicting a broadcast
+  tower emitting concentric "on the air" signal arcs next to a small
+  connected cluster of identity nodes with one highlighted — visually
+  tying together the notification and identity-grouping pillars in one
+  graphic. Colored entirely via the site's existing dark-theme CSS
+  variables (`--text-dim`, `--accent`, `--bg`, `--surface-alt`), with a
+  pulse animation gated behind `@media (prefers-reduced-motion:
+  no-preference)`. Rewrote the homepage hero copy
+  (`web/src/routes/+page.svelte`) to explicitly cover all three
+  pillars — browse/search, discover related identities, and
+  passwordless opt-in notifications — and added a 3-card feature grid
+  below the search box spelling out magic-link sign-in, watch-by-FRN,
+  and the email/SMS-gateway/webhook + send-test options, without
+  changing the existing search behavior. Added `web/static/favicon.svg`
+  (a simplified version of the same tower+signal motif, with hardcoded
+  colors matching the theme's palette since standalone favicons render
+  outside the page's CSS-variable scope) and wired it into `app.html`.
+
+  Testing: given the prior round's live-discovered `vite build` failure
+  that silently left production on a stale image, this round explicitly
+  ran a disposable `podman build` of `web/Dockerfile` on
+  `fcculs@10.64.3.39` **before** touching the live stack, confirmed it
+  succeeded, booted a throwaway container from the test image, and
+  grepped its built `/srv` assets for the new markers (`hero-graphic`,
+  `no password required`, `signal-arc`) — all present — then deleted the
+  disposable container/image. Only then ran `deploy/update.sh` for
+  real. Live-verified against production afterward: `GET /` → 200,
+  `GET /favicon.svg` → 200, and the same marker grep against the live
+  `fcculs-web` container's built assets confirmed the new hero graphic
+  and copy are genuinely served, with the image's
+  `org.opencontainers.image.revision` label matching the deployed
+  commit.
 
 ## 12. Future Features (Deferred)
 
