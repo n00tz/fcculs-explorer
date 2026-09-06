@@ -189,12 +189,39 @@ journalctl --user -u fcculs-bootstrap.service -f   # watch progress
 
 ### Updating after a rebuild
 
+For a one-off manual rebuild of a single service:
+
 ```bash
 podman build -t localhost/fcculs-api:latest ./api   # rebuild what changed
 systemctl --user restart fcculs-api.service         # restart just that unit
 ```
 
 Or re-run `deploy/install-quadlets.sh` after editing unit templates.
+
+**To deploy a new commit end-to-end** (the common case: you pushed a code
+change and want it live), use `deploy/update.sh` instead of the manual steps
+above:
+
+```bash
+bash deploy/update.sh
+```
+
+This pulls the latest commit (fast-forward only; it refuses to run over a
+dirty working tree), rebuilds `api`, `ingestor`, `notifier`, and `web` from
+that commit, and restarts `fcculs-migrate` (safe/idempotent to re-run) then
+every app unit so the new `:latest` images take effect immediately —
+Quadlet's systemd units always resolve `:latest` at container (re)start, so
+restarting is all that's needed once the image has been rebuilt. Every
+rebuilt image is tagged both `:latest` and `:<short-commit-sha>` (for
+rollback) and carries an `org.opencontainers.image.revision` label with the
+full commit hash, so `podman image inspect --format '{{ index .Labels
+"org.opencontainers.image.revision" }}' localhost/fcculs-api:latest` always
+tells you exactly what's deployed. It's idempotent: re-running when nothing
+changed is a no-op (`--force` overrides). Useful flags: `--no-pull` (rebuild
+whatever's checked out, e.g. to test an uncommitted change), `--no-restart`
+(build/tag only). To roll back, re-tag an older `:<short-sha>` image as
+`:latest` and restart that unit (the script prints the exact command at the
+end of a run).
 
 ### Uninstall
 
