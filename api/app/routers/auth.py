@@ -36,7 +36,13 @@ def resolve_base_url(request: Request) -> str:
     matter what public hostname/tunnel domain fronts the app, without
     requiring settings.magic_link_base_url to be kept in sync with it.
     Falls back to the static settings.magic_link_base_url if
-    trust_request_host is disabled or no Host header is present at all.
+    trust_request_host is disabled, no Host header is present at all, or
+    the resolved scheme://host isn't one of the operator-trusted origins
+    in settings.cors_allow_origins -- Caddy's Caddyfile doesn't strip or
+    rewrite X-Forwarded-Host, so a client can otherwise supply an
+    arbitrary Host/X-Forwarded-Host and have it echoed straight back into
+    the emailed magic-link URL and the session cookie's Secure-flag
+    scheme decision.
     """
     if settings.trust_request_host:
         host = request.headers.get("x-forwarded-host") or request.headers.get("host")
@@ -50,7 +56,9 @@ def resolve_base_url(request: Request) -> str:
                     except (ValueError, AttributeError):
                         proto = None
             proto = proto or request.url.scheme
-            return f"{proto}://{host}"
+            resolved = f"{proto}://{host}"
+            if resolved in settings.cors_allow_origins:
+                return resolved
     return settings.magic_link_base_url
 
 
