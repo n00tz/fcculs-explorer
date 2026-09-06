@@ -476,4 +476,20 @@ commands for a given test run are chained into a single SSH invocation.
   pending; future work is operational (monitoring the daily ingestor,
   applying `deploy/update.sh` after future commits) unless new feature
   requests come in.
+- ✅ `docs/user-guide.md` — done. An end-user-facing guide (as opposed to
+  the operator/admin-focused README): searching, the Amateur and Tower
+  browse pages' full per-field filter reference (partial-match text
+  filters, exact-match status/class dropdowns, height/date range filters
+  on Towers), how to read a detail page (including an explicit
+  explanation of the current-holder-vs-full-history callsign-reassignment
+  behavior fixed earlier this session, and the License History "Meaning"
+  column), the passwordless magic-link sign-in flow, and a full walkthrough
+  of My Watches (adding notification channels with the exact JSON config
+  shape each channel type expects, adding watches, what triggers an
+  alert) plus an FAQ. Explicitly notes that email/email-to-SMS delivery
+  depends on the operator's SMTP relay being configured, and that this
+  hasn't been connected/tested yet on the production instance — so
+  webhook-based channels (ntfy/Discord/Telegram/Matrix/generic webhook)
+  are the only ones that can be verified end-to-end for now. Linked from
+  `README.md`'s Status section and Repository Layout table.
 

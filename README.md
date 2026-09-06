@@ -12,6 +12,9 @@ Feature-complete for v1: ingestion, API, notifier, frontend, containerization,
 and the Compose stack are all built and verified. See `docs/plan.md` for the
 full design rationale and progress log.
 
+**Looking to use the app (search, browse, filters, sign-in, watches/alerts)
+rather than deploy or administer it? See `docs/user-guide.md`.**
+
 ## Stack
 
 | Concern | Choice |
@@ -43,7 +46,8 @@ db/         SQL migrations, applied in filename order by the `migrate`
             Compose service
 deploy/     deploy/smoke_test.sh -- a scripted Podman-pod smoke test used
             to validate that built images actually start and respond
-docs/       Implementation plan and progress log
+docs/       Implementation plan/progress log (plan.md) and the end-user
+            guide (user-guide.md)
 compose.yaml, .env.example   Compose stack definition (repo root)
 ```
 
