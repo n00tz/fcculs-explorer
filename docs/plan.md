@@ -182,9 +182,25 @@ volumes for Postgres data and Redis persistence (if enabled). A
 9. `compose-stack` — Author `compose.yaml`, `.env.example`, volumes/secrets,
    validate under rootless `podman compose`.
 10. `docs` — README covering deployment, configuration, and FCC data licensing/attribution notes.
+11. `quadlet-deployment` — Additive Podman Quadlet unit set + install/uninstall
+    scripts as an alternative to the Compose stack.
+12. `logout-ui` — Add a sign-out control to the frontend nav for the existing
+    magic-link session (backend `/api/auth/logout` already existed, unused).
+13. `admin-backend` — Hidden `/admin` panel API: log-only rotating superuser
+    password, admin session cookie, paginated users/watches CRUD.
+14. `admin-frontend` — Admin dashboard UI (login + Users/Watches tabs) at
+    `/admin`, excluded from `robots.txt`.
+15. `amateur-full-data` — Render every `amat_hd`/`amat_en`/`amat_am` column on
+    the Amateur detail page with crosslinks (FRN, city/state, status, class,
+    trustee/previous callsign) instead of a small attribute subset.
+16. `tower-full-data` — Same treatment for Tower detail (`tower_ra`/`tower_en`)
+    plus crosslinked browse-page filters read from URL query params.
+17. `future-roadmap-doc` — Document explicitly deferred future features
+    (other FCC ULS service databases, an MCP server) so they aren't lost.
 
 Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
-6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8.
+6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8; 11 depends on 9;
+12,13,15,16 depend on 6; 14 depends on 13.
 
 ## 10. Progress Log
 
@@ -587,4 +603,108 @@ commands for a given test run are chained into a single SSH invocation.
   SMTP fix above was made directly against `localhost:8080` on the host,
   which is why the bug wasn't caught then — a real tunnel-domain retest is
   the natural next verification step).
+
+- ✅ `logout-ui`, `admin-backend`, `admin-frontend`, `amateur-full-data`,
+  `tower-full-data`, `future-roadmap-doc` — done. Four user-requested
+  features landed together:
+
+  1. **Logout UI**: `web/src/lib/auth.js` (shared `user`/`authChecked`
+     store + `refreshUser()`/`logout()`) wired into the nav bar (shows
+     signed-in email + a Sign out button) and the auth callback page
+     (refreshes the store immediately after `/auth/verify` so the nav
+     updates without a reload). The backend `/api/auth/logout` endpoint
+     already existed but had no frontend caller until now.
+
+  2. **Hidden `/admin` panel**: `api/app/admin_auth.py` generates a
+     random `secrets.token_urlsafe(18)` password once per API process
+     start, keeps only its SHA-256 hash in memory, and logs the plaintext
+     once via `logger.warning()` — there is no admin password setting
+     anywhere (no env var, no `.env` entry, no DB row), so the *only* way
+     to learn the current password is reading the API container's logs,
+     per the request. A separate `itsdangerous`-signed admin session
+     cookie (distinct salt from the user-session cookie, same
+     `SESSION_SECRET`) gates `api/app/routers/admin.py`'s paginated
+     users/watches list + edit + delete endpoints, exposed at
+     `web/src/routes/admin/+page.svelte` (excluded via `robots.txt`).
+     Operational quirk worth remembering: the password rotates on every
+     API restart, including every `deploy/update.sh` run, so an operator
+     must re-check current logs after each deploy rather than reusing an
+     old password (the admin session cookie itself persists sign-in
+     across that rotation as long as it isn't cleared).
+
+  3. **Amateur/Tower full-data + crosslinking**: both detail endpoints
+     already did `SELECT *` against the raw ULS tables, so this was a
+     frontend-only change — the Amateur and Tower detail pages now render
+     every `amat_hd`/`amat_en`/`amat_am` and `tower_ra`/`tower_en` column,
+     with crosslinks from FRN → `/identity/frn/{frn}` (a new page listing
+     every Amateur/Tower record sharing that FRN), and from
+     status/operator class/city/state → the corresponding browse page
+     with that filter pre-applied. The browse pages (`amateur/+page.svelte`,
+     `towers/+page.svelte`) were updated to read `state`/`city`/`status`/
+     `class`/`structureType` from the URL's query string on mount so those
+     crosslinks (and clicking any filterable pill in the browse table
+     itself) actually pre-populate and apply the filter, not just link to
+     an empty browse page.
+
+  4. **Future roadmap documented** (not built, per the user's explicit
+     request to only note them): ingesting the other public FCC ULS
+     service databases beyond Amateur/Tower (e.g. GMRS, commercial
+     land-mobile, broadcast), and building an MCP server exposing this
+     app's search/browse/identity-grouping data to LLM tooling. See the
+     new "12. Future Features (Deferred)" section below.
+
+  Testing: added `api/tests/test_admin_auth.py` (password-hash
+  roundtrip/uniqueness across two `init_admin_password()` calls including
+  parsing the actual log line the same way an operator would, admin
+  session cookie roundtrip/tamper/garbage rejection) and extended
+  `api/tests/integration_test.py` with a full admin-panel flow (wrong
+  password rejected, login, list users, edit a user's email, delete a
+  user, logout, then confirm `/api/admin/users` 401s again) through
+  FastAPI's `TestClient` against a real Postgres instance, matching this
+  project's established pattern. Ran the full suite
+  (`api/tests/run_integration.sh`, 19 unit tests + the extended
+  integration script) in a disposable `python:3.12-slim` container on
+  `fcculs@10.64.3.39` — one flaky test was found and fixed along the way
+  (tampering only the *last* base64 character of the admin cookie's HMAC
+  signature can occasionally decode to the same bytes, since the final
+  character of a base64-encoded digest can encode unused bits; changed
+  the test to tamper a payload character instead) and one wrong status
+  code assumption was found and fixed (`/api/admin/logout` returns 200
+  like the existing `/api/auth/logout`, not 204) — all 19 unit tests +
+  the full integration script passed after both fixes.
+
+  Deployed via `deploy/update.sh` on `fcculs@10.64.3.39` (both `api` and
+  `web` images rebuilt, all Quadlet units restarted and confirmed
+  `active`). Live-verified: `GET /` → 200, `GET /admin` → 200 (SPA
+  shell), `GET /api/search?q=W1AW` → 200, logged into `/admin` for real
+  using the password read out of `journalctl --user -u fcculs-api`,
+  listed/edited/deleted a real test user via the admin API, and listed
+  real watches. Also re-checked the specific data bug reported earlier in
+  this project (N0OTZ showing the previous callsign holder's info mixed
+  with the current one) against the live API — `GET /api/amateur/N0OTZ`
+  now correctly returns only the current holder's `entity`/`amateur_specific`
+  data (Rial Sloan II, Ringgold GA), confirming that fix is still intact
+  after this session's detail-page rewrite, and confirmed a crosslink
+  query end-to-end (`GET /api/amateur?state=GA` returns GA-filtered
+  results, the same query param the new detail-page state links now
+  produce). Cleaned up all disposable test containers/pods and the test
+  user rows created during admin-panel verification.
+
+## 12. Future Features (Deferred)
+
+Explicitly out of scope for now, per the user, but worth keeping visible
+so they aren't lost or accidentally reinvented differently later:
+
+- **All other public FCC ULS service databases** beyond Amateur Radio and
+  ASR Tower (e.g. GMRS, commercial land-mobile, broadcast, aviation,
+  marine) — same daily/weekly transaction-file ingestion model this
+  project already uses, extended to more `l_*`/`r_*` dataset definitions.
+  Would reuse the existing ingestor/differ/change-event pipeline; the
+  main new work is per-service schema + parser definitions and frontend
+  browse/detail templates.
+- **An MCP (Model Context Protocol) server** exposing this app's
+  search/browse/identity-grouping/watch data as tools for LLM agents —
+  a natural complement to the existing REST API, likely implemented as a
+  thin additional service translating MCP tool calls to the existing
+  `api` endpoints rather than duplicating data-access logic.
 
