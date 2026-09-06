@@ -2,9 +2,15 @@
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
 
+	let registrationNumber = '';
+	let structureType = '';
+	let city = '';
 	let state = '';
 	let statusCode = '';
-	let structureType = '';
+	let heightMin = '';
+	let heightMax = '';
+	let constructedAfter = '';
+	let constructedBefore = '';
 	let page = 1;
 	const pageSize = 25;
 
@@ -18,9 +24,15 @@
 		error = '';
 		try {
 			const data = await get('/towers', {
+				registrationNumber: registrationNumber || undefined,
+				structureType: structureType || undefined,
+				city: city || undefined,
 				state: state || undefined,
 				status: statusCode || undefined,
-				structureType: structureType || undefined,
+				heightMin: heightMin || undefined,
+				heightMax: heightMax || undefined,
+				constructedAfter: constructedAfter || undefined,
+				constructedBefore: constructedBefore || undefined,
 				page,
 				page_size: pageSize
 			});
@@ -60,14 +72,20 @@
 <h1>Antenna Structure Registrations (Towers)</h1>
 
 <div class="filters">
-	<input placeholder="State (e.g. TN)" maxlength="2" bind:value={state} />
+	<input placeholder="Registration # (partial)" bind:value={registrationNumber} />
+	<input placeholder="Structure type (partial)" bind:value={structureType} />
+	<input placeholder="City (partial)" bind:value={city} />
+	<input placeholder="State" maxlength="2" bind:value={state} />
 	<select bind:value={statusCode}>
 		<option value="">Any status</option>
 		<option value="C">Constructed</option>
 		<option value="G">Granted</option>
 		<option value="D">Dismantled</option>
 	</select>
-	<input placeholder="Structure type (e.g. TOWER)" bind:value={structureType} />
+	<input placeholder="Min height (AGL, ft)" type="number" bind:value={heightMin} />
+	<input placeholder="Max height (AGL, ft)" type="number" bind:value={heightMax} />
+	<label class="filter-label">Constructed after <input type="date" bind:value={constructedAfter} /></label>
+	<label class="filter-label">Constructed before <input type="date" bind:value={constructedBefore} /></label>
 	<button on:click={applyFilters}>Apply filters</button>
 </div>
 

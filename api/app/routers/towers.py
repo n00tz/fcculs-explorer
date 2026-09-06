@@ -10,23 +10,50 @@ router = APIRouter(prefix="/api/towers", tags=["towers"])
 
 @router.get("", response_model=Page)
 async def browse_towers(
-    state: str | None = Query(None, min_length=2, max_length=2),
-    status_code: str | None = Query(None, alias="status"),
+    registration_number: str | None = Query(None, alias="registrationNumber"),
     structure_type: str | None = Query(None, alias="structureType"),
+    city: str | None = Query(None),
+    state: str | None = Query(None),
+    status_code: str | None = Query(None, alias="status"),
+    height_min: float | None = Query(None, alias="heightMin"),
+    height_max: float | None = Query(None, alias="heightMax"),
+    constructed_after: str | None = Query(None, alias="constructedAfter"),
+    constructed_before: str | None = Query(None, alias="constructedBefore"),
     page_params: PageParams = Depends(),
     conn: AsyncConnection = Depends(get_db),
 ):
     conditions = []
     params: dict = {}
+    # Partial (ILIKE) matching on every text field shown in the browse
+    # table, plus numeric/date range filters for height and construction
+    # date -- all displayed columns are filterable.
+    if registration_number:
+        conditions.append("ra.registration_number ILIKE %(registration_number)s")
+        params["registration_number"] = f"%{registration_number.strip()}%"
+    if structure_type:
+        conditions.append("ra.structure_type ILIKE %(structure_type)s")
+        params["structure_type"] = f"%{structure_type.strip()}%"
+    if city:
+        conditions.append("ra.structure_city ILIKE %(city)s")
+        params["city"] = f"%{city.strip()}%"
     if state:
-        conditions.append("ra.structure_state_code = %(state)s")
-        params["state"] = state.upper()
+        conditions.append("ra.structure_state_code ILIKE %(state)s")
+        params["state"] = f"%{state.strip()}%"
     if status_code:
         conditions.append("ra.status_code = %(status_code)s")
         params["status_code"] = status_code.upper()
-    if structure_type:
-        conditions.append("ra.structure_type = %(structure_type)s")
-        params["structure_type"] = structure_type.upper()
+    if height_min is not None:
+        conditions.append("ra.overall_height_above_ground >= %(height_min)s")
+        params["height_min"] = height_min
+    if height_max is not None:
+        conditions.append("ra.overall_height_above_ground <= %(height_max)s")
+        params["height_max"] = height_max
+    if constructed_after:
+        conditions.append("ra.date_constructed >= %(constructed_after)s")
+        params["constructed_after"] = constructed_after
+    if constructed_before:
+        conditions.append("ra.date_constructed <= %(constructed_before)s")
+        params["constructed_before"] = constructed_before
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
     async with conn.cursor() as cur:

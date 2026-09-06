@@ -327,3 +327,45 @@ seeded directly via SQL, exercised through the actual application code
 host doesn't have `loginctl linger` enabled, all pod/container lifecycle
 commands for a given test run are chained into a single SSH invocation.
 
+- ✅ Post-launch fix: Amateur callsign reassignment blending, history-code
+  descriptions, and browse filtering. Real operator testing against live
+  data (`KJ4IKD` → `N0OTZ`) found that `amateur_detail()` queried
+  `amat_hd`/`amat_en`/`amat_am` by bare `call_sign`, so a reassigned vanity
+  callsign non-deterministically blended the current and prior holder's
+  rows (confirmed via direct SQL probing: `N0OTZ` has two
+  `unique_system_identifier` rows, one per holder). Fixed by resolving the
+  current holder's USID first (`ORDER BY (license_status='A') DESC,
+  grant_date DESC NULLS LAST LIMIT 1`) and scoping the "current state"
+  tables to it, while `amat_hs` (license history) still queries by bare
+  callsign so the full reassignment timeline stays visible; added
+  `api/app/history_codes.py` with human-readable descriptions for the
+  real HS log codes found in the live 5.15M-row history table; added
+  partial (ILIKE) filtering on callsign/name/city/state to
+  `browse_amateur()` and matching filter inputs to
+  `web/src/routes/amateur/+page.svelte`. Verified live: `/api/amateur/N0OTZ`
+  now returns the correct current licensee/location/class with `KJ4IKD` in
+  `related_identities`, and vice versa; history rows carry
+  `code_description`.
+- ✅ Extended the same partial-match filtering pattern to the Tower browse
+  endpoint (`browse_towers()` in `api/app/routers/towers.py`), covering
+  every column shown in the Tower table: `registration_number`,
+  `structure_type`, `structure_city`, and `structure_state_code` are now
+  ILIKE partial matches; `overall_height_above_ground` and
+  `date_constructed` got min/max and after/before range filters
+  respectively (`status_code` stays an exact match, matching its
+  dropdown-select UI). Confirmed `tower_ra.registration_number` is a
+  primary key (one row per registration, unlike reassignable amateur
+  callsigns), so the tower detail endpoint's per-table lookups do not have
+  the same multi-holder blending risk the Amateur fix addressed and were
+  left unchanged. Updated `web/src/routes/towers/+page.svelte` with
+  matching filter inputs (registration #, structure type, city, state,
+  status, height min/max, constructed after/before). Rebuilt
+  `localhost/fcculs-api:latest` and `localhost/fcculs-web:latest` on
+  house-voyager, restarted `fcculs-api.service`/`fcculs-web.service`, and
+  verified live against the real 197K-row tower dataset:
+  `/api/towers?city=atlanta` returns only Atlanta-area structures across
+  multiple states, `/api/towers?heightMin=500` returns only towers ≥500 ft
+  AGL, `/api/towers?constructedAfter=2020-01-01` returns only towers built
+  since 2020, and `/towers` (the SvelteKit page) still returns 200 through
+  Caddy.
+
