@@ -28,7 +28,15 @@ def test_session_cookie_roundtrip():
 
 def test_session_cookie_rejects_tampering():
     cookie = create_session_cookie(user_id=42)
-    tampered = cookie[:-1] + ("A" if cookie[-1] != "A" else "B")
+    # Flip a character in the payload segment (before the first ".") rather
+    # than the very last character of the signature: the trailing base64
+    # character of an HMAC digest sometimes encodes unused bits, so it can
+    # occasionally decode to the same bytes when altered, making that
+    # specific position an unreliable place to test tamper-detection (see
+    # the identical fix applied to test_admin_auth.py's equivalent test).
+    payload, _, rest = cookie.partition(".")
+    tampered_payload = payload[:-1] + ("A" if payload[-1] != "A" else "B")
+    tampered = f"{tampered_payload}.{rest}"
     assert read_session_cookie(tampered) is None
 
 
