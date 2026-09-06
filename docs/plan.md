@@ -540,3 +540,51 @@ commands for a given test run are chained into a single SSH invocation.
   Cleaned up the disposable listener container, test network, and temp
   directories afterward.
 
+- ✅ Fixed magic-link emails always pointing at `http://localhost:8080`
+  instead of the actual public hostname a user reached the app through
+  (found by the user testing sign-in for real through the Cloudflare
+  Tunnel in front of `fcculs@10.64.3.39`, after the SMTP fix above made
+  emails actually deliver — the email arrived correctly, but its callback
+  link was `http://localhost:8080/auth/callback?...`, unusable off the
+  host itself). Root cause: `send_magic_link_email`'s link and the
+  auth-verify cookie's `secure` flag both unconditionally used the static
+  `settings.magic_link_base_url` (wired from `.env`'s `PUBLIC_BASE_URL`,
+  default `http://localhost:8080`) — there was no mechanism to derive the
+  actual public hostname the browser used.
+
+  Added `auth.resolve_base_url(request)` in `api/app/routers/auth.py`:
+  by default, derives the base URL from the incoming request's Host
+  header (preferring `X-Forwarded-Host`) and scheme (`X-Forwarded-Proto`,
+  falling back to Cloudflare Tunnel's `Cf-Visitor` header's scheme field,
+  then the request's own scheme) — Caddy's `reverse_proxy` passes the
+  original Host header through to the `api` service unchanged and sets
+  the `X-Forwarded-*` headers, and a Cloudflare Tunnel passes them through
+  unmodified in turn, so this works without any operator configuration.
+  Added `FCCULS_TRUST_REQUEST_HOST` (default `true`) to opt back into the
+  old static-`PUBLIC_BASE_URL`-always behavior for reverse proxies that
+  don't forward these headers reliably; `PUBLIC_BASE_URL` itself remains
+  as the fallback used when trust is disabled or a request somehow has no
+  Host header at all. Wired the new var through `compose.yaml`, the
+  `fcculs-api.container` Quadlet template, and
+  `deploy/install-quadlets.sh`'s substitution list; documented in
+  `.env.example` and README's configuration reference table.
+
+  Added `api/tests/test_auth_base_url.py` (6 unit tests: plain Host
+  header, `X-Forwarded-Host`/`-Proto` precedence over Host, `Cf-Visitor`
+  scheme fallback, request-scheme fallback when no proto headers present,
+  static-config fallback when no Host header at all, and the
+  `trust_request_host=false` override), wired into `run_integration.sh`
+  alongside the existing suites. Verified on `fcculs@10.64.3.39` in a
+  disposable container (overlaying the changed files onto a full copy of
+  the current `api/` tree so imports resolve): all 14 unit tests
+  (existing `test_security.py` + `test_mailer.py` + the 6 new tests) pass,
+  and the full `integration_test.py` — including the
+  `auth request-link/verify/me` flow exercised through FastAPI's
+  `TestClient` (whose default `Host: testserver` header round-trips
+  correctly through `resolve_base_url`) — passes unchanged. Deployed via
+  `deploy/update.sh` on production; not yet re-verified live through the
+  actual Cloudflare Tunnel domain (the sign-in request tested during the
+  SMTP fix above was made directly against `localhost:8080` on the host,
+  which is why the bug wasn't caught then — a real tunnel-domain retest is
+  the natural next verification step).
+
