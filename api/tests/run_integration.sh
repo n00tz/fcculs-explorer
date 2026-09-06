@@ -12,10 +12,23 @@ podman run -d --pod fcculs-api-itest --name fcculs-api-itest-pg \
   -e POSTGRES_PASSWORD=test -e POSTGRES_DB=fcculs_test \
   docker.io/library/postgres:16-alpine
 
+echo "=== Starting Redis (needed for rate-limiting on auth/admin-login) ==="
+podman run -d --pod fcculs-api-itest --name fcculs-api-itest-redis \
+  docker.io/library/redis:7-alpine
+
 echo "=== Waiting for Postgres to be ready ==="
 for i in $(seq 1 30); do
   if podman exec fcculs-api-itest-pg pg_isready -U postgres >/dev/null 2>&1; then
     echo "Postgres ready after ${i}s"
+    break
+  fi
+  sleep 1
+done
+
+echo "=== Waiting for Redis to be ready ==="
+for i in $(seq 1 30); do
+  if podman exec fcculs-api-itest-redis redis-cli ping >/dev/null 2>&1; then
+    echo "Redis ready after ${i}s"
     break
   fi
   sleep 1
@@ -35,8 +48,9 @@ echo "=== Running API unit + integration tests in python:3.12-slim ==="
 podman run --rm --pod fcculs-api-itest \
   -v /tmp/api_full:/app:Z \
   -e FCCULS_DATABASE_URL=postgresql://postgres:test@localhost:5432/fcculs_test \
+  -e FCCULS_REDIS_URL=redis://localhost:6379/0 \
   docker.io/library/python:3.12-slim \
-  bash -c "pip install --quiet -r /app/requirements.txt && cd /app && python3 -m pytest tests/test_security.py tests/test_mailer.py tests/test_auth_base_url.py tests/test_admin_auth.py -v && python3 tests/integration_test.py"
+  bash -c "pip install --quiet -r /app/requirements.txt && cd /app && python3 -m pytest tests/test_security.py tests/test_mailer.py tests/test_auth_base_url.py tests/test_admin_auth.py tests/test_url_safety.py -v && python3 tests/integration_test.py"
 
 # tests/real_smtp_smoke_test.py is a real-SMTP-listener smoke test (not
 # auto-run here, same as integration_test.py's real-Postgres model): it

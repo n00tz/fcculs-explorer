@@ -8,10 +8,30 @@ from pydantic import BaseModel
 
 from ..db import get_db
 from ..deps import get_current_user
+from ..url_safety import UnsafeUrlError, assert_safe_webhook_url
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 ALLOWED_CHANNEL_TYPES = {"smtp", "email_to_sms", "webhook", "ntfy", "discord", "telegram", "matrix"}
+
+# Channel types that make an outbound HTTP request to a user-supplied URL,
+# and which config key holds that URL -- validated at creation time (in
+# addition to the notifier re-validating at send time) so a bad URL is
+# rejected immediately with a clear error instead of silently failing to
+# deliver later. `telegram` is excluded: its URL is always
+# api.telegram.org, built server-side from a bot_token, not user-supplied.
+CHANNEL_URL_FIELDS = {
+    "webhook": "url",
+    "ntfy": "url",
+    "discord": "url",
+    "matrix": "homeserver",
+}
+
+# Per-user caps: a low-friction throttle on top of the URL-safety check,
+# limiting how much SSRF-probing or delivery volume one account can
+# generate even if a single validated URL is later found to be abusable.
+MAX_CHANNELS_PER_USER = 20
+MAX_WATCHES_PER_USER = 50
 
 
 class ChannelCreate(BaseModel):
@@ -37,7 +57,22 @@ async def create_channel(
 ):
     if body.channel_type not in ALLOWED_CHANNEL_TYPES:
         raise HTTPException(status_code=400, detail=f"channel_type must be one of {sorted(ALLOWED_CHANNEL_TYPES)}")
+
+    url_field = CHANNEL_URL_FIELDS.get(body.channel_type)
+    if url_field:
+        url = body.config.get(url_field)
+        if not url:
+            raise HTTPException(status_code=400, detail=f"{body.channel_type} channel config missing '{url_field}'")
+        try:
+            assert_safe_webhook_url(url)
+        except UnsafeUrlError as exc:
+            raise HTTPException(status_code=400, detail=f"{url_field} rejected: {exc}") from exc
+
     async with conn.cursor() as cur:
+        await cur.execute("SELECT count(*) AS total FROM notification_channels WHERE user_id = %s", (user["id"],))
+        if (await cur.fetchone())["total"] >= MAX_CHANNELS_PER_USER:
+            raise HTTPException(status_code=429, detail=f"Channel limit reached ({MAX_CHANNELS_PER_USER} per user)")
+
         await cur.execute(
             """
             INSERT INTO notification_channels (user_id, channel_type, label, config)

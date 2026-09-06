@@ -22,4 +22,10 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --proxy-headers with forwarded-allow-ips="*" is safe here: this container
+# publishes no host port and is only reachable from other containers on the
+# internal Podman network (in practice, only the `web` Caddy container),
+# so trusting X-Forwarded-* from any peer that can reach us is equivalent
+# to trusting Caddy specifically. This makes request.url.scheme correct
+# app-wide (e.g. cookie Secure flags) behind Caddy + Cloudflare Tunnel.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]

@@ -6,6 +6,7 @@ import httpx
 
 from .base import SendError
 from .webhook import send_webhook
+from ..url_safety import UnsafeUrlError, assert_safe_webhook_url
 
 
 def send_ntfy(config: dict, subject: str, body: str) -> None:
@@ -14,6 +15,10 @@ def send_ntfy(config: dict, subject: str, body: str) -> None:
     url = config.get("url")
     if not url:
         raise SendError("ntfy channel config missing 'url' (e.g. https://ntfy.sh/your-topic)")
+    try:
+        assert_safe_webhook_url(url)
+    except UnsafeUrlError as exc:
+        raise SendError(f"ntfy URL rejected: {exc}") from exc
     try:
         resp = httpx.post(
             url,

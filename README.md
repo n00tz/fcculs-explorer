@@ -259,6 +259,7 @@ just re-run `deploy/install-quadlets.sh`.
 | `PUBLIC_BASE_URL` | api | **Fallback only.** By default, magic-link emails use the actual Host/X-Forwarded-* headers of the request that triggered them (works automatically behind a reverse proxy or Cloudflare Tunnel); this is used only if `TRUST_REQUEST_HOST=false` or a request has no Host header |
 | `TRUST_REQUEST_HOST` | api | Set to `false` to always use `PUBLIC_BASE_URL` instead of deriving the base URL from request headers (default `true`) |
 | `PUBLISHED_PORT` | web | Host port the Caddy/web container is published on |
+| `CORS_ALLOW_ORIGINS` | api | Comma-separated list of origins allowed to make credentialed (cookie-carrying) cross-origin requests to the API. **Must be the real public hostname(s) users reach the app at** (e.g. your Cloudflare Tunnel domain) — never a wildcard, since browsers respond to a wildcard + credentials combination by letting *any* site ride a signed-in user's or admin's session cookie. Change any time by editing `.env` and restarting the `api` service (`podman compose restart api`, or `systemctl --user restart fcculs-api` under Quadlets) — no image rebuild required. Multiple origins: `CORS_ALLOW_ORIGINS=https://a.example,https://b.example` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_FROM_ADDRESS` | api, notifier | Outbound SMTP relay for magic-links and email/email-to-SMS alerts |
 | `INGEST_CRON_HOUR`, `INGEST_CRON_MINUTE` | ingestor | UTC time of the daily ingest job |
 | `MAX_DELIVERY_ATTEMPTS` | notifier | Retry cap per notification delivery |
@@ -268,6 +269,53 @@ Per-watch notification channels (SMTP address, email-to-SMS carrier
 gateway, or webhook URL/template — including ntfy/Discord/Telegram/Matrix
 presets) are configured by end users at runtime through the web UI /
 `/api/channels` endpoint, not via `.env`.
+
+## Security Hardening
+
+The app is designed to be exposed to the internet (e.g. via a Cloudflare
+Tunnel in front of the `web` container's published port). Baseline
+hardening already in place:
+
+- **CORS lockdown** — see `CORS_ALLOW_ORIGINS` above; the API never
+  reflects an arbitrary `Origin` header back with credentials enabled.
+- **Webhook SSRF protection** — any user-supplied notification URL
+  (webhook/ntfy/Discord/Matrix) is validated at both creation time
+  (`POST /api/channels`) and send time (the `notifier` service):
+  scheme is restricted to `http`/`https`, the hostname is resolved and
+  rejected if it points at a loopback, private, link-local (this also
+  covers the `169.254.169.254` cloud metadata address), multicast, or
+  reserved IP, and redirects are never followed. Each user is also
+  capped at 20 notification channels and 50 watches to limit abuse.
+- **Rate limiting** — Redis-backed limits on `POST /api/auth/request-link`
+  (5 requests per email+IP pair per hour) and `POST /api/admin/login`
+  (5 attempts per IP per 15 minutes), so this server can't be scripted
+  into a mail-spam relay against arbitrary email addresses and the
+  hidden admin login can't be hammered. Requires `redis` to be reachable
+  from `api` (already true in both the Compose and Quadlet deployments;
+  no `.env` changes needed).
+- **No default session secret** — the API refuses to start if
+  `SESSION_SECRET` is left unset or at its old placeholder value, since
+  this one key signs both the user and admin session cookies.
+- **Correct scheme detection behind the proxy chain** — the API trusts
+  `X-Forwarded-Proto`/`X-Forwarded-Host` from its container-network peers
+  (`uvicorn --proxy-headers --forwarded-allow-ips=*`; safe because the
+  `api` container publishes no host port and is only reachable from other
+  containers on the internal network, in practice only `web`/Caddy), so
+  cookies are correctly marked `Secure` when the app is actually served
+  over HTTPS through Caddy + a tunnel, not just when `api` itself sees a
+  raw HTTPS connection.
+- **Response headers** — `web/Caddyfile` sends HSTS,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `X-Frame-Options: DENY`,
+  and a `frame-ancestors 'none'` CSP on every response.
+- **Non-root containers** — all four app images (`api`, `ingestor`,
+  `notifier`, `web`) run as an explicit non-root `USER`.
+
+**Accepted risk**: FastAPI's interactive docs (`/docs`, `/redoc`,
+`/openapi.json`) are intentionally left publicly enabled, including for
+`/api/admin/*` endpoint shapes — a deliberate tradeoff for a small
+self-hosted deployment, not an oversight. The hidden `/admin` panel itself
+still requires the process-log-only superuser password regardless of
+what `/docs` reveals about its endpoint shapes.
 
 ## Development / Testing Methodology
 

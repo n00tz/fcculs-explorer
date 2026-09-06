@@ -20,6 +20,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user
 from ..mailer import send_magic_link_email
+from ..ratelimit import enforce_rate_limit
 from ..security import create_session_cookie, generate_magic_link_token, hash_token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -62,6 +63,12 @@ async def request_link(
     request: Request, body: RequestLinkBody, conn: AsyncConnection = Depends(get_db)
 ):
     email = body.email.lower()
+    client_ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        f"request-link:{email}:{client_ip}",
+        settings.rate_limit_magic_link_max,
+        settings.rate_limit_magic_link_window_seconds,
+    )
     async with conn.cursor() as cur:
         await cur.execute("SELECT id FROM users WHERE email = %s", (email,))
         user = await cur.fetchone()

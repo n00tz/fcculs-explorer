@@ -13,6 +13,7 @@ os.environ.setdefault(
     "FCCULS_DATABASE_URL", "postgresql://postgres:test@localhost:5432/fcculs_test"
 )
 os.environ.setdefault("FCCULS_MAGIC_LINK_BASE_URL", "http://testserver")
+os.environ.setdefault("FCCULS_SESSION_SECRET", "test-secret")
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -196,6 +197,36 @@ def main():
         resp = client.get("/api/watches")
         assert resp.status_code == 200
         assert len(resp.json()["watches"]) == 1
+
+        # --- webhook SSRF guard: internal/loopback URLs must be rejected ---
+        for bad_url in ("http://127.0.0.1:5432/", "http://localhost/", "http://postgres:5432/", "ftp://example.com/"):
+            resp = client.post(
+                "/api/channels",
+                json={"channel_type": "webhook", "label": "bad", "config": {"url": bad_url}},
+            )
+            assert resp.status_code == 400, f"expected 400 for {bad_url}, got {resp.status_code}: {resp.text}"
+        print("webhook SSRF guard rejects internal/invalid URLs OK")
+
+        # --- per-user channel/watch caps ---
+        from app.routers.channels import MAX_CHANNELS_PER_USER
+
+        extra_channel_ids = []
+        for i in range(MAX_CHANNELS_PER_USER - 1):  # one webhook channel already exists
+            resp = client.post(
+                "/api/channels",
+                json={"channel_type": "webhook", "label": f"cap-{i}", "config": {"url": "https://example.com/hook"}},
+            )
+            assert resp.status_code == 201, resp.text
+            extra_channel_ids.append(resp.json()["id"])
+        resp = client.post(
+            "/api/channels",
+            json={"channel_type": "webhook", "label": "over-cap", "config": {"url": "https://example.com/hook"}},
+        )
+        assert resp.status_code == 429, resp.text
+        print("per-user channel cap enforced OK")
+        for cid in extra_channel_ids:
+            resp = client.delete(f"/api/channels/{cid}")
+            assert resp.status_code == 204, resp.text
 
         resp = client.delete(f"/api/watches/{watch['id']}")
         assert resp.status_code == 204

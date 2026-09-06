@@ -9,8 +9,8 @@ sys.path.insert(0, "/app")
 
 from app.render import render_message
 from app.senders.email_to_sms import send_email_to_sms
-from app.senders.presets import send_discord, send_matrix, send_telegram
-from app.senders.webhook import _substitute
+from app.senders.presets import send_discord, send_matrix, send_ntfy, send_telegram
+from app.senders.webhook import _substitute, send_webhook
 from app.senders.base import SendError
 
 
@@ -51,6 +51,34 @@ class TestWebhookSubstitution(unittest.TestCase):
         result = _substitute(payload, "SUBJ", "BODY")
         self.assertEqual(result["content"], "SUBJ: BODY")
         self.assertEqual(result["meta"]["nested"], "BODY")
+
+
+class TestWebhookSsrfGuard(unittest.TestCase):
+    """send_webhook/send_ntfy must reject unsafe URLs before ever calling
+    httpx, and never follow redirects for URLs that do pass."""
+
+    def test_send_webhook_rejects_internal_url_without_calling_httpx(self):
+        with patch("app.senders.webhook.httpx.request") as mock_request:
+            with patch("app.url_safety.socket.getaddrinfo", return_value=[(None, None, None, None, ("10.0.0.5", 0))]):
+                with self.assertRaises(SendError):
+                    send_webhook({"url": "http://postgres:5432/"}, "s", "b")
+            mock_request.assert_not_called()
+
+    def test_send_webhook_calls_httpx_without_follow_redirects_kwarg(self):
+        # httpx.request's own default for follow_redirects is False; this
+        # test just confirms we don't override it to True anywhere.
+        with patch("app.senders.webhook.httpx.request") as mock_request:
+            with patch("app.url_safety.socket.getaddrinfo", return_value=[(None, None, None, None, ("93.184.216.34", 0))]):
+                send_webhook({"url": "https://example.com/hook"}, "s", "b")
+            _, kwargs = mock_request.call_args
+            self.assertNotIn("follow_redirects", kwargs)
+
+    def test_send_ntfy_rejects_internal_url_without_calling_httpx(self):
+        with patch("app.senders.presets.httpx.post") as mock_post:
+            with patch("app.url_safety.socket.getaddrinfo", return_value=[(None, None, None, None, ("127.0.0.1", 0))]):
+                with self.assertRaises(SendError):
+                    send_ntfy({"url": "http://localhost/topic"}, "s", "b")
+            mock_post.assert_not_called()
 
 
 class TestEmailToSmsSender(unittest.TestCase):

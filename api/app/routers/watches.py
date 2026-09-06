@@ -12,6 +12,10 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 
 ALLOWED_SUBJECT_TYPES = {"callsign", "uls_id", "asr_registration_number"}
 
+# Kept in sync with channels.py's MAX_CHANNELS_PER_USER -- see that file
+# for the rationale (a secondary throttle on top of URL-safety checks).
+MAX_WATCHES_PER_USER = 50
+
 
 class WatchCreate(BaseModel):
     subject_type: str
@@ -45,6 +49,10 @@ async def create_watch(
         raise HTTPException(status_code=400, detail=f"subject_type must be one of {sorted(ALLOWED_SUBJECT_TYPES)}")
 
     async with conn.cursor() as cur:
+        await cur.execute("SELECT count(*) AS total FROM watches WHERE user_id = %s", (user["id"],))
+        if (await cur.fetchone())["total"] >= MAX_WATCHES_PER_USER:
+            raise HTTPException(status_code=429, detail=f"Watch limit reached ({MAX_WATCHES_PER_USER} per user)")
+
         await cur.execute(
             "SELECT id FROM notification_channels WHERE id = %s AND user_id = %s",
             (body.channel_id, user["id"]),

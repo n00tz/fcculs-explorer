@@ -4,12 +4,18 @@ ntfy/Discord/Telegram/Matrix presets below."""
 import httpx
 
 from .base import SendError
+from ..url_safety import UnsafeUrlError, assert_safe_webhook_url
 
 
 def send_webhook(config: dict, subject: str, body: str) -> None:
     url = config.get("url")
     if not url:
         raise SendError("webhook channel config missing 'url'")
+
+    try:
+        assert_safe_webhook_url(url)
+    except UnsafeUrlError as exc:
+        raise SendError(f"webhook URL rejected: {exc}") from exc
 
     method = (config.get("method") or "POST").upper()
     payload = config.get("payload_template") or {"subject": subject, "body": body}
@@ -19,6 +25,9 @@ def send_webhook(config: dict, subject: str, body: str) -> None:
     headers = config.get("headers") or {}
 
     try:
+        # follow_redirects intentionally left at the httpx default (False):
+        # a redirect could point at an internal address we'd otherwise
+        # block, so we never follow one for a user-supplied webhook URL.
         resp = httpx.request(method, url, json=payload, headers=headers, timeout=10)
         resp.raise_for_status()
     except httpx.HTTPError as exc:

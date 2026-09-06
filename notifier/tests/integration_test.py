@@ -100,6 +100,14 @@ def main():
     print("dispatch idempotency OK")
 
     # --- process the queued job with a burst worker ---
+    # This test's mock webhook receiver deliberately lives on loopback
+    # (http://localhost:18080), which the SSRF guard (correctly) blocks in
+    # production. Set the guard's test-only escape hatch (see
+    # app/url_safety.py) for the duration of the burst worker so this
+    # test can still prove the full match -> enqueue -> send -> mark-sent
+    # pipeline against a real local capture server, without weakening the
+    # guard itself or touching any real socket/DNS behavior.
+    os.environ["FCCULS_ALLOW_PRIVATE_WEBHOOK_TARGETS_FOR_TESTING"] = "1"
     redis_conn = Redis.from_url(os.environ["FCCULS_REDIS_URL"])
     queue = Queue("fcculs-notifications", connection=redis_conn)
     worker = Worker([queue], connection=redis_conn)

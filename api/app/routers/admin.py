@@ -19,6 +19,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import get_current_admin
 from ..pagination import Page, PageParams
+from ..ratelimit import enforce_rate_limit
 from ..security import create_admin_session_cookie
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -30,6 +31,12 @@ class AdminLoginBody(BaseModel):
 
 @router.post("/login")
 async def admin_login(body: AdminLoginBody, response: Response, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        f"admin-login:{client_ip}",
+        settings.rate_limit_admin_login_max,
+        settings.rate_limit_admin_login_window_seconds,
+    )
     if not verify_admin_password(body.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
     response.set_cookie(

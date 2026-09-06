@@ -1,6 +1,18 @@
 :8080 {
 	encode gzip
 
+	# Defense-in-depth response headers for internet-facing exposure via
+	# Cloudflare Tunnel. HSTS is safe to send even over the plain-HTTP hop
+	# from cloudflared to this container, since it only affects how the
+	# browser behaves against the public hostname it connected to over TLS.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'"
+	}
+
 	# Reverse-proxy API calls to the api service (Compose network DNS name).
 	handle /api/* {
 		reverse_proxy api:8000

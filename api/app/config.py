@@ -1,4 +1,5 @@
 """Environment-driven configuration for the API service."""
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,7 +50,32 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_from_address: str = "no-reply@fcculs-explorer.example"
 
-    cors_allow_origins: list[str] = ["*"]
+    # CORS: comma-separated list of origins allowed to make credentialed
+    # cross-origin requests (browser sends the session/admin cookie along).
+    # MUST be the real public hostname(s) this app is served at (e.g. your
+    # Cloudflare Tunnel domain) -- never "*" combined with credentials,
+    # since browsers respond to that by reflecting back whatever Origin a
+    # requesting page sent, letting any website ride a logged-in user's or
+    # admin's session cookie. Change this via FCCULS_CORS_ALLOW_ORIGINS in
+    # .env at any time without a rebuild; multiple origins are supported,
+    # comma-separated (e.g. "https://a.example,https://b.example").
+    cors_allow_origins_raw: str = Field(
+        default="https://fcculs-explorer.n00tz.net", validation_alias="FCCULS_CORS_ALLOW_ORIGINS"
+    )
+
+    @property
+    def cors_allow_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allow_origins_raw.split(",") if origin.strip()]
+
+    # Redis-backed rate limiting for abuse-prone unauthenticated endpoints
+    # (magic-link request-link, admin login). Redis-backed rather than
+    # in-memory so limits survive an API restart/redeploy and are shared
+    # across multiple worker processes if ever scaled out.
+    redis_url: str = "redis://localhost:6379/0"
+    rate_limit_magic_link_max: int = 5
+    rate_limit_magic_link_window_seconds: int = 60 * 60  # 1 hour
+    rate_limit_admin_login_max: int = 5
+    rate_limit_admin_login_window_seconds: int = 60 * 15  # 15 minutes
 
 
 settings = Settings()
