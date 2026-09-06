@@ -1002,6 +1002,49 @@ commands for a given test run are chained into a single SSH invocation.
   callsigns; no production deploy needed since no application code
   changed.
 
+- ✅ `security-host-header-spoofing-fix` — done. Found and fixed a
+  Host-header-spoofing gap in `api/app/routers/auth.py`'s
+  `resolve_base_url()`: it previously trusted `X-Forwarded-Host`/`Host`
+  unconditionally, so any client requesting the API directly (not
+  through Cloudflare Tunnel/Caddy) could supply an arbitrary
+  `X-Forwarded-Host` and have it echoed straight into the emailed
+  magic-link URL and the session cookie's `Secure`-flag scheme decision
+  — Caddy's Caddyfile has no `header_up X-Forwarded-Host` directive to
+  strip/rewrite a client-supplied value first. Fix: the resolved
+  `scheme://host` is now validated against `settings.cors_allow_origins`
+  (the same trusted-origin allow-list already used for CORS) before
+  being trusted; on a mismatch it falls back to
+  `settings.magic_link_base_url` instead, exactly like the existing
+  no-Host-header/`trust_request_host=False` fallback paths. Added two
+  new unit tests to `api/tests/test_auth_base_url.py`
+  (`test_spoofed_host_not_in_allowlist_falls_back`,
+  `test_allowlisted_host_resolves_correctly`) plus updated the file's
+  `setUp`/`tearDown` to manage `cors_allow_origins_raw`; all 8 tests in
+  that file (6 pre-existing + 2 new) pass, along with the full
+  `api/tests/run_integration.sh` suite (27 unit tests + integration),
+  run in a disposable container on `fcculs@10.64.3.39`.
+
+  Tested for real against the live stack per this project's established
+  methodology: rather than touching the production `api`/`postgres`
+  containers directly, spun up two throwaway containers on the same
+  `fcculs` Podman network — a debug SMTP capture server
+  (`aiosmtpd.handlers.Debugging`) and a disposable copy of the rebuilt
+  `fcculs-api:latest` image (same env as the real Quadlet unit, SMTP
+  host pointed at the capture server) — then issued real
+  `POST /api/auth/request-link` calls against it with a spoofed
+  `X-Forwarded-Host: evil.attacker.example` header and inspected the
+  captured outbound email. Confirmed the emailed link used the
+  fallback `http://localhost:8080/auth/callback?...` (not the spoofed
+  host), and a follow-up call with a legitimate
+  `X-Forwarded-Host: fcculs-explorer.n00tz.net` (the real allow-listed
+  origin) correctly resolved to
+  `https://fcculs-explorer.n00tz.net/auth/callback?...`. Deployed the
+  fix to production via `deploy/update.sh` before this live test (image
+  revision label `47e5f8a...`); all disposable containers and the
+  test-created `users` rows (both from the pre-fix production
+  self-test and the disposable-container tests) were deleted
+  afterward.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
