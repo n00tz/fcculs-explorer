@@ -837,6 +837,97 @@ commands for a given test run are chained into a single SSH invocation.
   not just in the test suite. Cleaned up all disposable test
   containers/pods and scratch files created during verification.
 
+- ✅ `watch-by-frn`, `guided-channel-config-ui`, `expand-carrier-gateways`,
+  `channel-test-send`, `notification-crosslinks`, `browse-column-sorting` —
+  all done. Added a nullable `change_events.frn` column
+  (`db/005_frn_watch_support.sql`); the ingestor's daily (non-bootstrap)
+  path now emits one synthetic `license_granted`/`tower_registered` event
+  for any brand-new `amat_en`/`tower_en` row with a non-blank FRN, so a
+  user can watch an FRN before any callsign/tower exists for it — verified
+  end to end with a synthetic new-FRN row in a disposable ingestor
+  container. Added `frn` as a `watches.subject_type`, wired through the
+  matcher and message renderer. Replaced `watches/+page.svelte`'s freeform
+  JSON channel-config textarea with per-channel-type labeled form controls
+  (dropdowns/checkboxes/tooltips) and added a "new ham, don't have a
+  callsign yet?" callout above the Add-a-watch form; expanded
+  `email_to_sms.py`'s carrier table with 11 additional major US carriers
+  and MVNOs. Added `POST /api/channels/{id}/test` (enqueues a real RQ job
+  onto the same queue the notifier consumes, polls briefly, marks
+  `is_verified` on success) plus a platform-aware verbose test-message
+  renderer and a "Send test" button per channel. Added "🔔 Watch this"
+  crosslinks on Amateur/Tower detail pages (callsign, FRN, ASR
+  registration number) that deep-link to the watches page with the
+  subject pre-filled from URL query params. Added click-to-sort `<th>`
+  headers to both browse tables, backed by a per-endpoint column
+  allow-list (`SORTABLE_COLUMNS`) to prevent arbitrary-column injection.
+
+  Found and fixed along the way: (1) `run_integration.sh` for all three
+  services only applied migrations through `003`/`004`, never the new
+  `005` — fixed to apply it (api's script had also been missing `004`);
+  (2) a pre-existing flaky tamper-detection test in
+  `api/tests/test_security.py` (same root cause — and same fix — as a
+  previously-fixed equivalent in `test_admin_auth.py`: the trailing
+  base64 character of an HMAC digest can occasionally decode unchanged
+  when flipped).
+
+  Testing: extended `api/tests/integration_test.py` (FRN watch
+  create/delete, sort/order acceptance + invalid-column 400 rejection on
+  both browse endpoints, test-send ownership check + timeout-path check)
+  and `notifier/tests/test_senders.py` (`TestRenderTestMessage` — every
+  channel type, per-platform length limits, unknown-type fallback). Ran
+  the full ingestor/api/notifier suites in disposable containers on
+  `fcculs@10.64.3.39` against real Postgres + Redis — all passing (api:
+  25 unit + full integration; notifier: 26 unit + full integration;
+  ingestor: full integration incl. the FRN scenario).
+
+  Deployed via `deploy/install-quadlets.sh` (new `FCCULS_QUEUE_NAME` env
+  var) + `deploy/update.sh`, then live-verified `GET /`, `GET
+  /api/search`, and both browse endpoints' sorting (valid + invalid
+  column) directly against production.
+
+  **Two more real bugs found only by live end-to-end testing with an
+  authenticated session** (there being no accessible email inbox to
+  drive the normal magic-link flow, verification used a throwaway
+  `users` row plus a session cookie minted with the API's own
+  `create_session_cookie()` and production's real `SESSION_SECRET`
+  inside the running `api` container — cleaned up afterward):
+
+  1. A real `ntfy.sh` test-send succeeded (200 OK, confirmed in
+     `fcculs-notifier-worker`'s journal) but took ~11s, longer than the
+     api's 8s poll window, so the client was told `"timeout"` and
+     `notification_channels.is_verified` was never set despite the send
+     genuinely succeeding. Fixed by moving the `is_verified = true`
+     update into `notifier/app/jobs.py::send_test_message()` itself (the
+     true source of truth for whether a send succeeded, regardless of
+     whether the api is still polling) and bumping
+     `FCCULS_TEST_SEND_POLL_TIMEOUT_SECONDS`'s default from 8.0 to 20.0
+     to better match real external-relay latency. Added a notifier
+     integration-test assertion covering `send_test_message()` marking
+     `is_verified`. Re-verified live: a repeat `ntfy.sh` test-send now
+     returns `{"status": "sent"}` within the poll window and
+     `is_verified` is `true`; a `smtp` test-send against the real relay
+     at `10.64.3.25` also returned `"sent"`.
+  2. **The web frontend image had been silently stuck on a stale
+     pre-guided-UI build** (`org.opencontainers.image.revision` pinned
+     at an old commit, `9369f3b`) since the guided-channel-config UI
+     landed — `vite build` had been failing outright on
+     `watches/+page.svelte`'s `<input type={f.kind}
+     bind:value={...}/>` (Svelte disallows a dynamic `type=` attribute
+     on an element with two-way binding), so none of this round's
+     frontend work (guided channel forms, FRN watch type, watch
+     crosslinks, column sorting) had actually reached production despite
+     `deploy/update.sh` reporting success for the other three images.
+     Fixed by branching on `f.kind` with a static `type=` per branch
+     (`email`/`tel`/`url`/text-fallback) instead of interpolating it.
+     Rebuilt — `vite build` now succeeds — and confirmed live by
+     grepping the built `/srv` assets inside the running `fcculs-web`
+     container for each new feature's marker text/class (the new-ham
+     FRN callout, "Watch this callsign", `sort-th`), all present, plus
+     confirming the image's revision label now matches the fixed commit.
+
+  All test artifacts (test user, test channels, test watch) were deleted
+  from production afterward.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
