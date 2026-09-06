@@ -10,7 +10,7 @@ from typing import Optional
 
 import psycopg
 
-from db import fetch_existing_row, insert_change_event, upsert_row
+from db import fetch_existing_row, insert_change_event, upsert_row, upsert_rows_batch
 from differ import diff_rows
 from parser import parse_dat_file
 
@@ -50,6 +50,22 @@ def ingest_file(
     key_cols = record_def["key"]
     subject_field = SUBJECT_KEY_FIELD.get(table)
     subject_type = SUBJECT_TYPE.get(table)
+
+    # Fast path: no diffing (bootstrap / complete-dump load). Every row is a
+    # straight upsert, so batch them with executemany instead of doing a
+    # per-row SELECT + INSERT -- orders of magnitude faster on the
+    # multi-hundred-thousand-row weekly dumps. Semantics are identical for a
+    # fresh/complete load: last-write-wins per key, no change_events.
+    if not generate_diffs:
+        written = upsert_rows_batch(
+            conn,
+            table,
+            parse_dat_file(path, record_def["schema"], strict=False),
+            key_cols,
+        )
+        conn.commit()
+        logger.info("%s: %d rows loaded (batch fast path)", path.name, written)
+        return {"rows": written, "changes": 0, "inserted": written}
 
     rows = 0
     changes = 0

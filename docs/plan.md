@@ -300,6 +300,22 @@ live status):
   500'd right after a postgres restart on a stale pooled connection —
   psycopg_pool recovers on its own within seconds, confirmed by immediate
   successful retry.
+- ✅ First real data load completed on house-voyager via
+  `fcculs-bootstrap.service`: full weekly dumps ingested — amateur HD/EN/AM
+  ~1.69M rows each, HS history 5.15M rows, towers RA/EN/CO ~197K/197K/203K
+  rows — and `curl :8080/api/search?q=W1AW` now returns the ARRL HQ station
+  with exact-match score plus trigram-similar callsigns. This surfaced a
+  real performance bug: the ingestor's per-row SELECT+INSERT upsert path
+  managed only ~100 rows/s over the container network (parsing alone
+  benchmarks at ~103K rows/s), which would have made the bootstrap take
+  multiple hours. Fixed by adding `db.upsert_rows_batch()` (psycopg
+  server-side `executemany`, 2000-row batches) and using it in
+  `ingest.ingest_file()` whenever `generate_diffs=False` (bootstrap /
+  complete-dump loads); semantics unchanged — last-write-wins per key, no
+  change_events — and daily diff-enabled ingestion keeps the original
+  row-by-row diff path. HD.dat (1.69M rows) dropped from an estimated ~3
+  hours to ~7 minutes; the entire two-service bootstrap now completes in
+  ~30 minutes.
 
 **Testing methodology established across all services**: since the local
 Windows dev machine has no Python/container runtime, all real testing runs
