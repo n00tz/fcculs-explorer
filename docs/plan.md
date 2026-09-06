@@ -391,4 +391,36 @@ commands for a given test run are chained into a single SSH invocation.
   changed files from the local repo, which is the actual source of truth)
   immediately before any rebuild, rather than assuming a previously-used
   `/tmp` directory already has the latest code.
+- ✅ `deploy/update.sh` — done. A single-command "deploy the latest commit"
+  script for the Quadlet path: `git pull --ff-only` (refuses a dirty
+  working tree), rebuilds `api`/`ingestor`/`notifier`/`web`, tags each
+  image both `:latest` (what the Quadlet units reference — a
+  `systemctl --user restart` immediately picks it up, no unit edits
+  needed) and `:<short-commit-sha>` (immutable, for rollback), stamps
+  every image with an `org.opencontainers.image.revision` label carrying
+  the full commit hash (so `podman image inspect` always answers "what
+  commit is this?" even after `:latest`/short-sha tags get overwritten by
+  a later build), then restarts `fcculs-migrate` (idempotent, safe to
+  re-run) followed by every app unit. Idempotent: skips the rebuild
+  entirely if HEAD didn't move and the current `:latest` image's revision
+  label already matches (checked via `podman image inspect`), unless
+  `--force`. Supports `--no-pull` (deploy an uncommitted local change) and
+  `--no-restart` (build/tag only). Documented in a new README subsection
+  under "Updating after a rebuild".
+
+  **Verified on house-voyager** with a *fresh* `git clone` of the pushed
+  GitHub repo (simulating a real "internet user" who has never touched
+  the `/tmp` build directories used earlier in this session) plus the
+  existing `.env` copied in: (1) first run built all 4 images, tagged
+  `:latest`/`:<sha>`, applied the revision label, restarted all 6 units to
+  `active`, and `curl :8080/` / `curl :8080/api/search?q=W1AW` both
+  returned 200 with real data; (2) an immediate re-run correctly no-op'd
+  ("Already up to date ... Nothing to do"); (3) `--force` correctly
+  rebuilt anyway; (4) a plain run (git pull against an already-clean,
+  up-to-date tree) succeeded end-to-end. One nit found and fixed locally:
+  the script inherited the executable bit on the test clone from a manual
+  `chmod +x`, which would have shown as a spurious dirty-tree diff on
+  every future pull — confirmed the committed file mode matches the other
+  `deploy/*.sh` scripts (644, invoked via `bash deploy/update.sh`, not
+  directly).
 
