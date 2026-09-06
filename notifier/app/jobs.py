@@ -7,7 +7,7 @@ import psycopg
 
 from .config import settings
 from .db import get_connection
-from .render import render_message
+from .render import render_message, render_test_message
 from .senders import SENDERS
 from .senders.base import SendError
 
@@ -97,3 +97,39 @@ def _mark_failed(conn: psycopg.Connection, delivery_id: int, error: str) -> None
             """,
             (settings.max_delivery_attempts, error, delivery_id),
         )
+
+
+_LOAD_CHANNEL_SQL = "SELECT channel_type, config FROM notification_channels WHERE id = %s"
+
+
+def send_test_message(channel_id: int) -> dict:
+    """Entry point enqueued into RQ as `app.jobs.send_test_message` -- unlike
+    `send_delivery`, this isn't tied to any real watch/change_event: it's
+    enqueued directly by the api service (a separate container/codebase, so
+    referenced here by string path rather than an imported function
+    reference -- see api/app/routers/channels.py's test-send endpoint) when
+    a signed-in user clicks "Send test" on one of their channels.
+
+    Returns a small result dict on success (captured by RQ as the job's
+    result, which the api endpoint polls for); raises on failure so RQ
+    records it as a failed job with the exception available via
+    `job.latest_result()`/`job.exc_info`.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_LOAD_CHANNEL_SQL, (channel_id,))
+            row = cur.fetchone()
+
+        if row is None:
+            raise SendError(f"channel {channel_id} not found")
+
+        sender = SENDERS.get(row["channel_type"])
+        if sender is None:
+            raise SendError(f"unknown channel_type '{row['channel_type']}'")
+
+        subject, body = render_test_message(row["channel_type"])
+        sender(row["config"], subject, body)
+        return {"channel_type": row["channel_type"], "sent": True}
+    finally:
+        conn.close()

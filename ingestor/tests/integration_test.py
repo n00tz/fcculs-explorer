@@ -69,6 +69,56 @@ def main():
 
     print("ALL INTEGRATION CHECKS PASSED")
 
+    # 3. Watch-by-FRN support: bootstrap-load amat_EN.dat (5 existing rows,
+    #    no diffs expected on first load), then simulate a daily EN file
+    #    that adds one brand-new row (a new USID/callsign never seen
+    #    before) carrying an FRN -- expect exactly one synthetic
+    #    'license_granted' change_events row for that FRN, and confirm the
+    #    modified existing rows produce ordinary per-field diffs, not a
+    #    second synthetic event.
+    result3 = ingest_file(
+        conn, fixtures / "amat_EN.dat",
+        {"schema": schemas.AMAT_EN, "table": "amat_en", "key": ["unique_system_identifier"]},
+        source_file="l_amat.zip", effective_date=date(2026, 9, 1), generate_diffs=False,
+    )
+    assert result3["rows"] == 5, result3
+    assert result3["changes"] == 0, result3
+    print("EN bootstrap load OK:", result3)
+
+    en_content = fixtures.joinpath("amat_EN.dat").read_bytes()
+    new_en_row = (
+        b"EN|999999|||N0NEW|L|L09999999|TESTUSER, NEW E|NEW|E|TESTUSER|||||"
+        b"1 New Ham Way|RINGGOLD|GA|30736|||000|0009999999|I||||||\n"
+    )
+    daily_en_path = Path("/tmp/daily_EN.dat")
+    daily_en_path.write_bytes(en_content + new_en_row)
+
+    result4 = ingest_file(
+        conn, daily_en_path,
+        {"schema": schemas.AMAT_EN, "table": "amat_en", "key": ["unique_system_identifier"]},
+        source_file="l_am_tue.zip", effective_date=date(2026, 9, 3), generate_diffs=True,
+    )
+    print("EN daily load (new record) OK:", result4)
+    assert result4["inserted"] == 1, result4
+    assert result4["changes"] == 1, result4
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT subject_type, subject_key, field_name, old_value, new_value, frn "
+            "FROM change_events WHERE frn = '0009999999'"
+        )
+        rows = cur.fetchall()
+        print("frn change_events rows:", rows)
+        assert len(rows) == 1
+        assert rows[0][0] == "amateur_license"
+        assert rows[0][1] == "N0NEW"
+        assert rows[0][2] == "license_granted"
+        assert rows[0][3] is None
+        assert rows[0][4] == "N0NEW"
+        assert rows[0][5] == "0009999999"
+
+    print("ALL WATCH-BY-FRN CHECKS PASSED")
+
 
 if __name__ == "__main__":
     main()

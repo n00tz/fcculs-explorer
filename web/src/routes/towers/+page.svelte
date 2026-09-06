@@ -14,6 +14,8 @@
 	let constructedBefore = '';
 	let page = 1;
 	const pageSize = 25;
+	let sortColumn = 'registration_number';
+	let sortOrder = 'asc';
 
 	let items = [];
 	let total = 0;
@@ -43,6 +45,8 @@
 				heightMax: heightMax || undefined,
 				constructedAfter: constructedAfter || undefined,
 				constructedBefore: constructedBefore || undefined,
+				sort: sortColumn,
+				order: sortOrder,
 				page,
 				page_size: pageSize
 			});
@@ -66,6 +70,22 @@
 		else if (field === 'city') city = value ?? '';
 		else if (field === 'state') state = value ?? '';
 		applyFilters();
+	}
+
+	function toggleSort(column) {
+		if (sortColumn === column) {
+			sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortColumn = column;
+			sortOrder = 'asc';
+		}
+		page = 1;
+		load();
+	}
+
+	function sortIndicator(column) {
+		if (sortColumn !== column) return '';
+		return sortOrder === 'asc' ? ' \u25b2' : ' \u25bc';
 	}
 
 	function nextPage() {
@@ -116,12 +136,12 @@
 <table>
 	<thead>
 		<tr>
-			<th>Registration #</th>
-			<th>Type</th>
-			<th>Status</th>
-			<th>Location</th>
-			<th>Height (AGL)</th>
-			<th>Constructed</th>
+			<th><button class="sort-th" on:click={() => toggleSort('registration_number')}>Registration #{sortIndicator('registration_number')}</button></th>
+			<th><button class="sort-th" on:click={() => toggleSort('structure_type')}>Type{sortIndicator('structure_type')}</button></th>
+			<th><button class="sort-th" on:click={() => toggleSort('status_code')}>Status{sortIndicator('status_code')}</button></th>
+			<th><button class="sort-th" on:click={() => toggleSort('city')}>Location{sortIndicator('city')}</button></th>
+			<th><button class="sort-th" on:click={() => toggleSort('overall_height_above_ground')}>Height (AGL){sortIndicator('overall_height_above_ground')}</button></th>
+			<th><button class="sort-th" on:click={() => toggleSort('date_constructed')}>Constructed{sortIndicator('date_constructed')}</button></th>
 		</tr>
 	</thead>
 	<tbody>

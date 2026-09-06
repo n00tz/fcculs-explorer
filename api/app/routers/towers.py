@@ -3,9 +3,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg import AsyncConnection
 
 from ..db import get_db
-from ..pagination import Page, PageParams
+from ..pagination import Page, PageParams, resolve_sort
 
 router = APIRouter(prefix="/api/towers", tags=["towers"])
+
+# Allow-list mapping the columns actually displayed in the Tower browse
+# table to their real SQL expressions -- see amateur.py's SORTABLE_COLUMNS
+# for the same rationale (validated against this, never interpolated raw).
+SORTABLE_COLUMNS = {
+    "registration_number": "ra.registration_number",
+    "structure_type": "ra.structure_type",
+    "status_code": "ra.status_code",
+    "city": "ra.structure_city",
+    "state": "ra.structure_state_code",
+    "overall_height_above_ground": "ra.overall_height_above_ground",
+    "date_constructed": "ra.date_constructed",
+}
 
 
 @router.get("", response_model=Page)
@@ -19,9 +32,12 @@ async def browse_towers(
     height_max: float | None = Query(None, alias="heightMax"),
     constructed_after: str | None = Query(None, alias="constructedAfter"),
     constructed_before: str | None = Query(None, alias="constructedBefore"),
+    sort: str | None = Query(None, description=f"One of {sorted(SORTABLE_COLUMNS)}"),
+    order: str | None = Query(None, description="asc or desc"),
     page_params: PageParams = Depends(),
     conn: AsyncConnection = Depends(get_db),
 ):
+    sort_expr, sort_direction = resolve_sort(sort, order, SORTABLE_COLUMNS, default_column="registration_number")
     conditions = []
     params: dict = {}
     # Partial (ILIKE) matching on every text field shown in the browse
@@ -67,7 +83,7 @@ async def browse_towers(
                    ra.overall_height_above_ground, ra.date_constructed
             FROM tower_ra ra
             {where_clause}
-            ORDER BY ra.registration_number
+            ORDER BY {sort_expr} {sort_direction} NULLS LAST, ra.registration_number
             LIMIT %(limit)s OFFSET %(offset)s
             """,
             {**params, "limit": page_params.limit, "offset": page_params.offset},

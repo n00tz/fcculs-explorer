@@ -2,12 +2,16 @@
 email-to-SMS gateway, generic webhook, ntfy/Discord/Telegram/Matrix presets)
 a signed-in user can attach to watches."""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from psycopg import AsyncConnection
 from psycopg.types.json import Json
 from pydantic import BaseModel
 
 from ..db import get_db
 from ..deps import get_current_user
+from ..config import settings
+from ..ratelimit import enforce_rate_limit
+from ..test_send import enqueue_and_wait_for_test_send
 from ..url_safety import UnsafeUrlError, assert_safe_webhook_url
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
@@ -97,3 +101,34 @@ async def delete_channel(
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Channel not found")
     await conn.commit()
+
+
+@router.post("/{channel_id}/test")
+async def test_channel(
+    channel_id: int, user: dict = Depends(get_current_user), conn: AsyncConnection = Depends(get_db)
+):
+    """Send a real test message through this channel so the user can
+    confirm it actually works before relying on it for real alerts.
+    Enqueues onto the same queue the notifier consumes for real deliveries
+    and waits briefly for a result (see ../test_send.py)."""
+    await enforce_rate_limit(
+        f"test-send:{user['id']}", settings.rate_limit_test_send_max, settings.rate_limit_test_send_window_seconds
+    )
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT id FROM notification_channels WHERE id = %s AND user_id = %s", (channel_id, user["id"])
+        )
+        if await cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Channel not found")
+
+    result = await run_in_threadpool(enqueue_and_wait_for_test_send, channel_id)
+
+    if result["status"] == "sent":
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE notification_channels SET is_verified = true WHERE id = %s", (channel_id,)
+            )
+        await conn.commit()
+
+    return result

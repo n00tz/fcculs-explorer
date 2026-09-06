@@ -56,6 +56,7 @@ INGEST_CRON_HOUR="${ENVVALS[INGEST_CRON_HOUR]:-7}"
 INGEST_CRON_MINUTE="${ENVVALS[INGEST_CRON_MINUTE]:-0}"
 MAX_DELIVERY_ATTEMPTS="${ENVVALS[MAX_DELIVERY_ATTEMPTS]:-5}"
 DISPATCH_INTERVAL_SECONDS="${ENVVALS[DISPATCH_INTERVAL_SECONDS]:-60}"
+QUEUE_NAME="${ENVVALS[QUEUE_NAME]:-fcculs-notifications}"
 
 # Images: Quadlet can't `build:` like Compose, so point at locally built
 # images (build them first -- see README's Quadlet section) unless
@@ -101,6 +102,7 @@ render() { # render <template-file> <output-file>
   content="${content//%INGEST_CRON_MINUTE%/$INGEST_CRON_MINUTE}"
   content="${content//%MAX_DELIVERY_ATTEMPTS%/$MAX_DELIVERY_ATTEMPTS}"
   content="${content//%DISPATCH_INTERVAL_SECONDS%/$DISPATCH_INTERVAL_SECONDS}"
+  content="${content//%QUEUE_NAME%/$QUEUE_NAME}"
   content="${content//%API_IMAGE%/$API_IMAGE}"
   content="${content//%INGESTOR_IMAGE%/$INGESTOR_IMAGE}"
   content="${content//%NOTIFIER_IMAGE%/$NOTIFIER_IMAGE}"

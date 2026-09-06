@@ -4,9 +4,24 @@ from psycopg import AsyncConnection
 
 from ..db import get_db
 from ..history_codes import describe_history_code
-from ..pagination import Page, PageParams
+from ..pagination import Page, PageParams, resolve_sort
 
 router = APIRouter(prefix="/api/amateur", tags=["amateur"])
+
+# Allow-list mapping the columns actually displayed in the Amateur browse
+# table to their real SQL expressions -- sort/order query params are
+# validated against this (never interpolated raw) to prevent SQL injection
+# via arbitrary column names.
+SORTABLE_COLUMNS = {
+    "call_sign": "hd.call_sign",
+    "license_status": "hd.license_status",
+    "operator_class": "am.operator_class",
+    "entity_name": "en.entity_name",
+    "state": "en.state",
+    "city": "en.city",
+    "grant_date": "hd.grant_date",
+    "expired_date": "hd.expired_date",
+}
 
 
 @router.get("", response_model=Page)
@@ -17,9 +32,12 @@ async def browse_amateur(
     state: str | None = Query(None),
     status_code: str | None = Query(None, alias="status"),
     operator_class: str | None = Query(None, alias="class"),
+    sort: str | None = Query(None, description=f"One of {sorted(SORTABLE_COLUMNS)}"),
+    order: str | None = Query(None, description="asc or desc"),
     page_params: PageParams = Depends(),
     conn: AsyncConnection = Depends(get_db),
 ):
+    sort_expr, sort_direction = resolve_sort(sort, order, SORTABLE_COLUMNS, default_column="call_sign")
     conditions = []
     params: dict = {}
     # Partial (ILIKE) matching on the human-facing fields so "ring", "GA",
@@ -67,7 +85,7 @@ async def browse_amateur(
             LEFT JOIN amat_en en ON en.unique_system_identifier = hd.unique_system_identifier
             LEFT JOIN amat_am am ON am.unique_system_identifier = hd.unique_system_identifier
             {where_clause}
-            ORDER BY hd.call_sign
+            ORDER BY {sort_expr} {sort_direction} NULLS LAST, hd.call_sign
             LIMIT %(limit)s OFFSET %(offset)s
             """,
             {**params, "limit": page_params.limit, "offset": page_params.offset},

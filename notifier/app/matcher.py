@@ -14,6 +14,7 @@ JOIN watches w ON w.is_active
     AND (
         (w.subject_type IN ('callsign', 'asr_registration_number') AND w.subject_value = ce.subject_key)
         OR (w.subject_type = 'uls_id' AND w.subject_value = ce.uls_system_id)
+        OR (w.subject_type = 'frn' AND w.subject_value = ce.frn)
     )
 LEFT JOIN notification_deliveries nd
     ON nd.watch_id = w.id AND nd.change_event_id = ce.id

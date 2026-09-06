@@ -13,6 +13,7 @@ ContainerName=fcculs-notifier-worker
 Network=fcculs.network
 Environment=FCCULS_DATABASE_URL=postgresql://%POSTGRES_USER%:%POSTGRES_PASSWORD%@postgres:5432/%POSTGRES_DB%
 Environment=FCCULS_REDIS_URL=redis://redis:6379/0
+Environment=FCCULS_QUEUE_NAME=%QUEUE_NAME%
 Environment=FCCULS_SMTP_HOST=%SMTP_HOST%
 Environment=FCCULS_SMTP_PORT=%SMTP_PORT%
 Environment=FCCULS_SMTP_USER=%SMTP_USER%

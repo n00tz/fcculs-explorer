@@ -2,11 +2,16 @@
 	import { page } from '$app/stores';
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
+	import { user } from '$lib/auth.js';
 
 	let detail = null;
 	let error = '';
 	let loading = true;
 	let callSign = '';
+
+	function watchLink(subjectType, value) {
+		return `/watches?subject_type=${encodeURIComponent(subjectType)}&subject_value=${encodeURIComponent(value)}`;
+	}
 
 	$: callSign = $page.params.callsign;
 
@@ -39,6 +44,9 @@
 	<h1>
 		{detail.header.call_sign}
 		<span class={`pill status-${detail.header.license_status}`}>{detail.header.license_status}</span>
+		{#if $user}
+			<a class="watch-link" href={watchLink('callsign', detail.header.call_sign)}>🔔 Watch this callsign</a>
+		{/if}
 	</h1>
 
 	<h2>License</h2>
@@ -59,7 +67,7 @@
 	<div class="card detail-grid">
 		<div><div class="label">Licensee / Entity</div><div class="value">{detail.entity?.entity_name ?? '—'}</div></div>
 		<div><div class="label">Contact Name</div><div class="value">{[detail.entity?.first_name, detail.entity?.mi, detail.entity?.last_name, detail.entity?.suffix].filter(Boolean).join(' ') || '—'}</div></div>
-		<div><div class="label">FRN</div><div class="value">{#if detail.entity?.frn}<a href={`/identity/frn/${detail.entity.frn}`}>{detail.entity.frn}</a>{:else}—{/if}</div></div>
+		<div><div class="label">FRN</div><div class="value">{#if detail.entity?.frn}<a href={`/identity/frn/${detail.entity.frn}`}>{detail.entity.frn}</a>{#if $user}<a class="watch-link" href={watchLink('frn', detail.entity.frn)}>🔔 Watch this FRN</a>{/if}{:else}—{/if}</div></div>
 		<div><div class="label">Entity Type</div><div class="value">{detail.entity?.entity_type ?? '—'}</div></div>
 		<div><div class="label">Applicant Type</div><div class="value">{detail.entity?.applicant_type_code ?? '—'}</div></div>
 		<div><div class="label">Street Address</div><div class="value">{[detail.entity?.street_address, detail.entity?.po_box, detail.entity?.attention_line].filter(Boolean).join(', ') || '—'}</div></div>

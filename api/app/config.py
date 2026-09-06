@@ -77,5 +77,14 @@ class Settings(BaseSettings):
     rate_limit_admin_login_max: int = 5
     rate_limit_admin_login_window_seconds: int = 60 * 15  # 15 minutes
 
+    # Channel "test send" -- enqueues a real send job onto the same RQ queue
+    # the notifier service consumes (must match FCCULS_QUEUE_NAME on the
+    # notifier side; see notifier/app/config.py). Rate-limited per-user so
+    # this can't be used as a free send-anything relay.
+    queue_name: str = "fcculs-notifications"
+    test_send_poll_timeout_seconds: float = 8.0
+    rate_limit_test_send_max: int = 10
+    rate_limit_test_send_window_seconds: int = 60 * 60  # 1 hour
+
 
 settings = Settings()

@@ -215,11 +215,37 @@ volumes for Postgres data and Redis persistence (if enabled). A
     to `web/Dockerfile`.
 25. `security-docs-plan-update` — Document this assessment + fixes + a
     progress log entry here.
+26. `watch-by-frn` — Let a user watch an FCC Registration Number (FRN)
+    before any callsign/tower exists for it: `change_events.frn` column,
+    synthetic `license_granted`/`tower_registered` events emitted for
+    brand-new `amat_en`/`tower_en` rows during daily (non-bootstrap)
+    ingest, `frn` watch subject type end-to-end (API, matcher, render),
+    and a documented "new ham" callout on the watches page.
+27. `guided-channel-config-ui` — Replace the freeform JSON channel-config
+    textarea with per-channel-type labeled/tooltipped form controls
+    (dropdowns, radio-equivalents, checkboxes) in `watches/+page.svelte`;
+    no backend contract change.
+28. `expand-carrier-gateways` — Add major US carriers + large MVNOs to
+    `notifier/app/senders/email_to_sms.py`'s `CARRIER_GATEWAYS` table.
+29. `channel-test-send` — `POST /api/channels/{id}/test`, RQ-based real
+    send through the existing sender code, platform-aware verbose test
+    message (respecting each platform's practical length limit), marks
+    `is_verified` on success, "Send test" button in the channel list UI.
+30. `notification-crosslinks` — "🔔 Watch this" links on Amateur and
+    Tower detail pages (callsign, FRN, ASR registration number), visible
+    only when signed in, deep-linking to the watches page with the
+    subject type/value pre-filled from URL query params.
+31. `browse-column-sorting` — Click-to-sort on every currently-displayed
+    column in both the Amateur and Tower browse tables, backend
+    allow-listed per endpoint to prevent arbitrary-column SQL injection.
 
 Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
 6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8; 11 depends on 9;
 12,13,15,16 depend on 6; 14 depends on 13; 18-24 depend on 9 (existing
-compose/Quadlet config); 25 depends on 18-24.
+compose/Quadlet config); 25 depends on 18-24. 26 depends on 4,5 (existing
+watch/notifier pipeline); 27,28 are independent of each other and of 26;
+29 depends on 27 (reuses the same channel-row UI); 30 depends on 26 (needs
+the `frn` subject type) and is best done after 27; 31 is fully independent.
 
 ## 10. Progress Log
 

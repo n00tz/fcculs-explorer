@@ -2,11 +2,16 @@
 	import { page } from '$app/stores';
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
+	import { user } from '$lib/auth.js';
 
 	let detail = null;
 	let error = '';
 	let loading = true;
 	let registration = '';
+
+	function watchLink(subjectType, value) {
+		return `/watches?subject_type=${encodeURIComponent(subjectType)}&subject_value=${encodeURIComponent(value)}`;
+	}
 
 	$: registration = $page.params.registration;
 
@@ -39,6 +44,9 @@
 	<h1>
 		Tower {detail.registration.registration_number}
 		<span class="pill">{detail.registration.status_code}</span>
+		{#if $user}
+			<a class="watch-link" href={watchLink('asr_registration_number', detail.registration.registration_number)}>🔔 Watch this tower</a>
+		{/if}
 	</h1>
 
 	<h2>Registration</h2>
@@ -84,7 +92,7 @@
 						<tr>
 							<td>{e.entity_name}</td>
 							<td>{e.entity_type ?? '—'}</td>
-							<td>{#if e.frn}<a href={`/identity/frn/${e.frn}`}>{e.frn}</a>{:else}—{/if}</td>
+							<td>{#if e.frn}<a href={`/identity/frn/${e.frn}`}>{e.frn}</a>{#if $user}<a class="watch-link" href={watchLink('frn', e.frn)}>🔔</a>{/if}{:else}—{/if}</td>
 							<td>
 								{#if e.city}<a href={`/towers?city=${encodeURIComponent(e.city)}`}>{e.city}</a>,{/if}
 								{#if e.state}<a href={`/towers?state=${e.state}`}>{e.state}</a>{/if}

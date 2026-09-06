@@ -10,7 +10,7 @@ from ..deps import get_current_user
 
 router = APIRouter(prefix="/api/watches", tags=["watches"])
 
-ALLOWED_SUBJECT_TYPES = {"callsign", "uls_id", "asr_registration_number"}
+ALLOWED_SUBJECT_TYPES = {"callsign", "uls_id", "asr_registration_number", "frn"}
 
 # Kept in sync with channels.py's MAX_CHANNELS_PER_USER -- see that file
 # for the rationale (a secondary throttle on top of URL-safety checks).

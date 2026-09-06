@@ -97,16 +97,17 @@ def insert_change_event(
     new_value,
     source_file: str,
     effective_date: date,
+    frn: Optional[str] = None,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO change_events
-                (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (subject_type, subject_key, uls_system_id, field_name,
              str(old_value) if old_value is not None else None,
              str(new_value) if new_value is not None else None,
-             source_file, effective_date),
+             source_file, effective_date, frn or None),
         )

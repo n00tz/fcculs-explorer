@@ -33,6 +33,18 @@ SUBJECT_TYPE = {
     "tower_en": "tower",
 }
 
+# Tables carrying an FRN, and the synthetic change_events field_name emitted
+# when a genuinely brand-new row (never seen before) appears for that table
+# during a daily incremental ingest. This is how a "watch by FRN" (set up
+# before a callsign/tower registration exists yet) gets notified: normal
+# diff_rows() intentionally produces no events for brand-new rows (to avoid
+# spamming "changed from nothing" for every field), so without this, a new
+# licensee's first callsign grant would never fire any change_event at all.
+NEW_RECORD_FRN_EVENT = {
+    "amat_en": "license_granted",
+    "tower_en": "tower_registered",
+}
+
 
 def ingest_file(
     conn: psycopg.Connection,
@@ -81,6 +93,28 @@ def ingest_file(
 
         if existing is None:
             inserted += 1
+            # Brand-new record: no field-diff event (see NEW_RECORD_FRN_EVENT
+            # comment above), but if this table carries an FRN, emit one
+            # synthetic "a new asset appeared for this identity" event so a
+            # watch set on that FRN (e.g. a brand-new ham who only knows
+            # their FRN, before any callsign exists) actually fires.
+            new_record_field = NEW_RECORD_FRN_EVENT.get(table)
+            if generate_diffs and new_record_field and subject_field and subject_type:
+                frn = (record.get("frn") or "").strip()
+                if frn:
+                    insert_change_event(
+                        conn,
+                        subject_type=subject_type,
+                        subject_key=record.get(subject_field) or "",
+                        uls_system_id=str(record.get("unique_system_identifier") or "") or None,
+                        field_name=new_record_field,
+                        old_value=None,
+                        new_value=record.get(subject_field),
+                        source_file=source_file,
+                        effective_date=effective_date,
+                        frn=frn,
+                    )
+                    changes += 1
         elif generate_diffs and subject_field and subject_type:
             field_changes = diff_rows(existing, record)
             for field_name, old_value, new_value in field_changes:

@@ -73,6 +73,7 @@ services:
       FCCULS_TRUST_REQUEST_HOST: ${TRUST_REQUEST_HOST:-true}
       FCCULS_CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-https://fcculs-explorer.n00tz.net}
       FCCULS_REDIS_URL: redis://redis:6379/0
+      FCCULS_QUEUE_NAME: ${QUEUE_NAME:-fcculs-notifications}
       FCCULS_SMTP_HOST: ${SMTP_HOST:-localhost}
       FCCULS_SMTP_PORT: ${SMTP_PORT:-587}
       FCCULS_SMTP_USER: ${SMTP_USER:-}
@@ -105,6 +106,7 @@ services:
     environment: &notifier_env
       FCCULS_DATABASE_URL: postgresql://${POSTGRES_USER:-fcculs}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fcculs}
       FCCULS_REDIS_URL: redis://redis:6379/0
+      FCCULS_QUEUE_NAME: ${QUEUE_NAME:-fcculs-notifications}
       FCCULS_SMTP_HOST: ${SMTP_HOST:-localhost}
       FCCULS_SMTP_PORT: ${SMTP_PORT:-587}
       FCCULS_SMTP_USER: ${SMTP_USER:-}
