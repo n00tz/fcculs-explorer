@@ -368,4 +368,27 @@ commands for a given test run are chained into a single SSH invocation.
   AGL, `/api/towers?constructedAfter=2020-01-01` returns only towers built
   since 2020, and `/towers` (the SvelteKit page) still returns 200 through
   Caddy.
+- ⚠️ Found and fixed a deployment-process bug immediately after the tower
+  filtering work: the remote host had **two divergent build directories**
+  (`/tmp/build_ctx`, used for the Amateur fix, and `/tmp/fcculs-stack`, a
+  separately-scp'd older checkout used for the Tower fix). Rebuilding the
+  API/web images from `/tmp/fcculs-stack` silently reverted the Amateur
+  filtering, the current-holder-USID resolution, and the history-code
+  descriptions, because that directory's `api/app/routers/amateur.py` and
+  `web/src/routes/amateur/+page.svelte` predated those fixes and it was
+  missing `api/app/history_codes.py` entirely — none of that was visible
+  until a user reported the regression. Root-caused via a diff of every
+  `api/**/*.py` and `web/src/**` file between the two remote directories
+  (only the expected tower-only differences remained afterward). Fixed by
+  copying the canonical, already-correct local repo files
+  (`amateur.py`, `history_codes.py`, both amateur `+page.svelte` files)
+  onto `/tmp/fcculs-stack`, rebuilding both images once more, and
+  re-verifying live: `/api/amateur?name=Sloan` (partial match) and
+  `/api/amateur/N0OTZ` (correct current holder) both work again alongside
+  `/api/towers?city=atlanta`. **Lesson for future remote work**: the
+  remote host has no single canonical repo checkout — always diff the
+  target build directory against the last-known-good one (or re-sync all
+  changed files from the local repo, which is the actual source of truth)
+  immediately before any rebuild, rather than assuming a previously-used
+  `/tmp` directory already has the latest code.
 
