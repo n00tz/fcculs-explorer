@@ -492,4 +492,51 @@ commands for a given test run are chained into a single SSH invocation.
   webhook-based channels (ntfy/Discord/Telegram/Matrix/generic webhook)
   are the only ones that can be verified end-to-end for now. Linked from
   `README.md`'s Status section and Repository Layout table.
+- ✅ Fixed a real SMTP-auth bug in `api/app/mailer.py`'s
+  `send_magic_link_email()`, found once a real SMTP relay
+  (`10.64.3.25`) was connected for the first time. The function
+  unconditionally passed `username=settings.smtp_user` and
+  `password=settings.smtp_password` to `aiosmtplib.send()`. Because the
+  Quadlet units' `Environment=` lines always set `FCCULS_SMTP_USER` to a
+  real (possibly empty) string rather than omitting it when no SMTP user
+  is configured, `settings.smtp_user` ends up as `""` instead of `None` —
+  and aiosmtplib treats *any* non-`None` username as "please authenticate
+  after connecting," so it attempted `AUTH` against relays that don't
+  support/advertise it, failing with `The SMTP AUTH extension is not
+  supported by this server`. Fixed by building the `aiosmtplib.send()`
+  kwargs dict conditionally — only adding `username`/`password` when
+  `settings.smtp_user` is truthy — mirroring the already-correct
+  `if settings.smtp_user: client.login(...)` guard in
+  `notifier/app/senders/smtp.py`'s `send_smtp()` (left untouched, per the
+  task). Added `api/tests/test_mailer.py` (4 mocked `unittest.TestCase`
+  regression tests, matching `notifier/tests/test_senders.py`'s
+  mock-the-network-boundary convention): empty-string user → no
+  username/password kwargs, `None` user → same, configured user → both
+  kwargs passed correctly, and configured user with `None` password →
+  password defaults to `""`. Wired into `api/tests/run_integration.sh`'s
+  existing `pytest tests/test_security.py ...` invocation.
+
+  **Tested for real, not just mocked**, per this project's established
+  methodology: added `api/tests/real_smtp_smoke_test.py`, a manually-run
+  smoke test (same "not auto-collected by pytest, run directly with
+  `python3 tests/real_smtp_smoke_test.py`" convention as
+  `integration_test.py`'s real-Postgres model) that sends a real magic-link
+  email against a live SMTP listener. Ran it on the production host
+  (`fcculs@10.64.3.39`) against a disposable `aiosmtpd` Debugging-server
+  container (a real listener that does not support/advertise `AUTH`,
+  isolated on its own throwaway Podman network) in two configurations to
+  prove the before/after: (1) with the **original, unfixed**
+  `mailer.py` (checked out from git history into a separate temp
+  directory) and `FCCULS_SMTP_USER=""`, the send failed with the exact
+  reported error — `aiosmtplib.errors.SMTPException: The SMTP AUTH
+  extension is not supported by this server`; (2) with the **fixed**
+  `mailer.py` and the same `FCCULS_SMTP_USER=""`, the send completed with
+  no error, and the listener's debug log shows the full real email
+  (From/To/Subject/body with the magic-link URL) actually received.
+  Also ran the 4 new mocked unit tests plus the existing
+  `tests/test_security.py` together via `pytest` (the project's actual
+  test runner, not `python -m unittest`, which doesn't discover
+  `test_security.py`'s plain `test_*()` functions) — all 8 passed.
+  Cleaned up the disposable listener container, test network, and temp
+  directories afterward.
 
