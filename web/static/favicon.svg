@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+	<!-- Standalone favicon: browsers render this outside the site's CSS
+	     context, so colors are hardcoded to match app.css's dark theme
+	     (--bg, --accent, --text-dim) rather than using var()/currentColor. -->
+	<rect width="32" height="32" rx="6" fill="#0f1420" />
+	<path d="M16 8 L11 26 H21 Z" fill="none" stroke="#9aa4b8" stroke-width="1.6" stroke-linejoin="round" />
+	<line x1="12.6" y1="20" x2="19.4" y2="20" stroke="#9aa4b8" stroke-width="1.4" />
+	<circle cx="16" cy="7" r="1.6" fill="#4da3ff" />
+	<path d="M19 8.5 A5 5 0 0 1 22.5 12" fill="none" stroke="#4da3ff" stroke-width="1.6" stroke-linecap="round" opacity="0.85" />
+	<path d="M20.5 5.5 A9 9 0 0 1 26 12" fill="none" stroke="#4da3ff" stroke-width="1.6" stroke-linecap="round" opacity="0.5" />
+</svg>

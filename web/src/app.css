@@ -299,3 +299,115 @@ tr:hover td {
 .detail-grid .value {
 	font-size: 0.95rem;
 }
+
+/* --- Homepage hero + themed SVG graphic --- */
+.hero {
+	display: flex;
+	align-items: center;
+	gap: 2rem;
+	flex-wrap: wrap;
+	margin-bottom: 0.5rem;
+}
+.hero-text {
+	flex: 1 1 320px;
+}
+.hero-text h1 {
+	margin-bottom: 0.6rem;
+}
+.hero-graphic {
+	flex: 1 1 280px;
+	max-width: 420px;
+	margin: 0 auto;
+}
+.hero-graphic svg {
+	width: 100%;
+	height: auto;
+	display: block;
+}
+.hero-graphic .signal-arc {
+	fill: none;
+	stroke: var(--accent);
+	stroke-width: 3;
+	stroke-linecap: round;
+	animation: signal-pulse 3s ease-in-out infinite;
+}
+.hero-graphic .tower-lines line {
+	stroke: var(--text-dim);
+	stroke-width: 2.5;
+	stroke-linecap: round;
+}
+.hero-graphic .beacon-dot {
+	fill: var(--accent);
+	transform-origin: 170px 68px;
+	animation: beacon-pulse 1.6s ease-in-out infinite;
+}
+.hero-graphic .identity-cluster line {
+	stroke: var(--text-dim);
+	stroke-width: 1.5;
+	opacity: 0.55;
+}
+.hero-graphic .node-peer {
+	fill: var(--surface-alt);
+	stroke: var(--text-dim);
+	stroke-width: 2;
+}
+.hero-graphic .node-watched {
+	fill: var(--accent);
+	stroke: var(--bg);
+	stroke-width: 2;
+}
+
+@keyframes signal-pulse {
+	0%,
+	100% {
+		opacity: var(--arc-op, 0.6);
+	}
+	50% {
+		opacity: calc(var(--arc-op, 0.6) * 0.35);
+	}
+}
+@keyframes beacon-pulse {
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.55;
+		transform: scale(1.35);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.hero-graphic .signal-arc,
+	.hero-graphic .beacon-dot {
+		animation: none;
+		opacity: var(--arc-op, 0.6);
+	}
+}
+@media (max-width: 720px) {
+	.hero {
+		flex-direction: column-reverse;
+	}
+	.hero-graphic {
+		max-width: 320px;
+	}
+}
+
+.feature-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 1rem;
+	margin: 1.5rem 0;
+}
+.feature-card h3 {
+	margin: 0 0 0.4rem;
+	font-size: 1.02rem;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+.feature-card p {
+	margin: 0;
+	color: var(--text-dim);
+	font-size: 0.9rem;
+}
