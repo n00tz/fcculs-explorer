@@ -26,22 +26,22 @@ DSN = os.environ["FCCULS_DATABASE_URL"]
 
 SEED_SQL = """
 INSERT INTO amat_hd (unique_system_identifier, call_sign, license_status, grant_date, expired_date)
-VALUES (232195, 'K0WNL', 'A', '2026-08-29', '2036-11-21');
+VALUES (232195, 'N0OTZ', 'A', '2026-08-29', '2036-11-21');
 
 INSERT INTO amat_en (unique_system_identifier, call_sign, entity_name, frn, state, city, street_address)
-VALUES (232195, 'K0WNL', 'BEAHM, DONALD E', '0002204154', 'KS', 'GREAT BEND', '328 Sunset Rd');
+VALUES (232195, 'N0OTZ', 'SLOAN, RIAL II', '0001112223', 'GA', 'RINGGOLD', '100 Test Rd');
 
 INSERT INTO amat_am (unique_system_identifier, callsign, operator_class, group_code)
-VALUES (232195, 'K0WNL', 'E', 'A');
+VALUES (232195, 'N0OTZ', 'G', 'A');
 
 INSERT INTO amat_hs (unique_system_identifier, callsign, log_date, code)
-VALUES (232195, 'K0WNL', '2026-08-29', 'GR');
+VALUES (232195, 'N0OTZ', '2026-08-29', 'GR');
 
 -- A second amateur record sharing the same FRN, to prove identity grouping.
 INSERT INTO amat_hd (unique_system_identifier, call_sign, license_status, grant_date, expired_date)
-VALUES (232196, 'K0WNL2', 'A', '2026-08-29', '2036-11-21');
+VALUES (232196, 'KJ4IKD', 'A', '2026-08-29', '2036-11-21');
 INSERT INTO amat_en (unique_system_identifier, call_sign, entity_name, frn, state, city, street_address)
-VALUES (232196, 'K0WNL2', 'BEAHM, DONALD E', '0002204154', 'KS', 'GREAT BEND', '328 Sunset Rd');
+VALUES (232196, 'KJ4IKD', 'SLOAN, RIAL II', '0001112223', 'GA', 'RINGGOLD', '100 Test Rd');
 
 INSERT INTO tower_ra (registration_number, unique_system_identifier, content_indicator, file_number,
                        structure_city, structure_state_code, structure_type, status_code)
@@ -66,7 +66,7 @@ INSERT INTO tower_co (registration_number, unique_system_identifier, content_ind
 VALUES ('7654321', 1334622, 'REG', 'A1385251', 'T', 'N', 151663.9, 'W', 316512.9);
 
 INSERT INTO change_events (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date)
-VALUES ('amateur_license', 'K0WNL', '232195', 'license_status', 'A', 'E', 'l_am_mon.zip', '2026-09-02');
+VALUES ('amateur_license', 'N0OTZ', '232195', 'license_status', 'A', 'E', 'l_am_mon.zip', '2026-09-02');
 """
 
 
@@ -97,30 +97,30 @@ def main():
 
     with TestClient(app) as client:
         # --- search ---
-        resp = client.get("/api/search", params={"q": "K0WNL"})
+        resp = client.get("/api/search", params={"q": "N0OTZ"})
         assert resp.status_code == 200, resp.text
         results = resp.json()["results"]
-        assert any(r["key"] == "K0WNL" and r["result_type"] == "amateur" for r in results), results
+        assert any(r["key"] == "N0OTZ" and r["result_type"] == "amateur" for r in results), results
         print("search OK:", len(results), "results")
 
         # --- amateur browse ---
-        resp = client.get("/api/amateur", params={"state": "KS"})
+        resp = client.get("/api/amateur", params={"state": "GA"})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["total"] >= 2, body
         print("amateur browse OK:", body["total"], "total")
 
         # --- amateur detail + identity grouping ---
-        resp = client.get("/api/amateur/K0WNL")
+        resp = client.get("/api/amateur/N0OTZ")
         assert resp.status_code == 200, resp.text
         detail = resp.json()
-        assert detail["header"]["call_sign"] == "K0WNL"
-        assert detail["entity"]["frn"] == "0002204154"
+        assert detail["header"]["call_sign"] == "N0OTZ"
+        assert detail["entity"]["frn"] == "0001112223"
         assert len(detail["history"]) == 1
         assert len(detail["change_log"]) == 1
         assert detail["change_log"][0]["field_name"] == "license_status"
         related_keys = {r["subject_key"] for r in detail["related_identities"]}
-        assert "K0WNL2" in related_keys, detail["related_identities"]
+        assert "KJ4IKD" in related_keys, detail["related_identities"]
         print("amateur detail + identity grouping OK")
 
         resp = client.get("/api/amateur/NOSUCHCALL")
@@ -144,10 +144,10 @@ def main():
         print("tower detail + site grouping OK")
 
         # --- identity by FRN ---
-        resp = client.get("/api/identity/frn/0002204154")
+        resp = client.get("/api/identity/frn/0001112223")
         assert resp.status_code == 200, resp.text
         members = resp.json()["members"]
-        assert {"K0WNL", "K0WNL2"} <= {m["subject_key"] for m in members}
+        assert {"N0OTZ", "KJ4IKD"} <= {m["subject_key"] for m in members}
         print("identity by FRN OK")
 
         # --- auth: request link -> verify -> me ---
@@ -183,11 +183,11 @@ def main():
 
         resp = client.post(
             "/api/watches",
-            json={"subject_type": "callsign", "subject_value": "k0wnl", "channel_id": channel_id},
+            json={"subject_type": "callsign", "subject_value": "n0otz", "channel_id": channel_id},
         )
         assert resp.status_code == 201, resp.text
         watch = resp.json()
-        assert watch["subject_value"] == "K0WNL"
+        assert watch["subject_value"] == "N0OTZ"
         print("watch create OK:", watch["id"])
 
         # --- watch-by-FRN: a brand-new ham watching their FRN before they
@@ -206,7 +206,7 @@ def main():
 
         # --- browse column sorting: amateur + tower browse both accept
         # sort/order and reject unknown columns ---
-        resp = client.get("/api/amateur", params={"state": "KS", "sort": "entity_name", "order": "desc"})
+        resp = client.get("/api/amateur", params={"state": "GA", "sort": "entity_name", "order": "desc"})
         assert resp.status_code == 200, resp.text
         resp = client.get("/api/amateur", params={"sort": "not_a_real_column"})
         assert resp.status_code == 400, resp.text
@@ -231,7 +231,7 @@ def main():
         # Duplicate watch should conflict.
         resp = client.post(
             "/api/watches",
-            json={"subject_type": "callsign", "subject_value": "K0WNL", "channel_id": channel_id},
+            json={"subject_type": "callsign", "subject_value": "N0OTZ", "channel_id": channel_id},
         )
         assert resp.status_code == 409, resp.text
         print("watch duplicate conflict OK")

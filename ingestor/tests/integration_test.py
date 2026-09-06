@@ -32,14 +32,14 @@ def main():
     print("Bootstrap load OK:", result)
 
     with conn.cursor() as cur:
-        cur.execute("SELECT license_status FROM amat_hd WHERE call_sign = 'K0WNL'")
+        cur.execute("SELECT license_status FROM amat_hd WHERE call_sign = 'KM4TYD'")
         assert cur.fetchone()[0] == "A"
 
-    # 2. Simulate a daily transaction file with K0WNL's status changed from A to E
+    # 2. Simulate a daily transaction file with KM4TYD's status changed from A to E
     #    (e.g. license expired) -- everything else identical.
     daily_content = fixtures.joinpath("amat_HD.dat").read_bytes()
     modified = daily_content.replace(
-        b"HD|232195|0012170403||K0WNL|A|HA|", b"HD|232195|0012170403||K0WNL|E|HA|", 1
+        b"HD|232195|0012170403||KM4TYD|A|HA|", b"HD|232195|0012170403||KM4TYD|E|HA|", 1
     )
     daily_path = Path("/tmp/daily_HD.dat")
     daily_path.write_bytes(modified)
@@ -53,12 +53,12 @@ def main():
     assert result2["changes"] == 1, result2
 
     with conn.cursor() as cur:
-        cur.execute("SELECT license_status FROM amat_hd WHERE call_sign = 'K0WNL'")
+        cur.execute("SELECT license_status FROM amat_hd WHERE call_sign = 'KM4TYD'")
         assert cur.fetchone()[0] == "E"
 
         cur.execute(
             "SELECT subject_type, subject_key, field_name, old_value, new_value, source_file "
-            "FROM change_events WHERE subject_key = 'K0WNL'"
+            "FROM change_events WHERE subject_key = 'KM4TYD'"
         )
         rows = cur.fetchall()
         print("change_events rows:", rows)
@@ -87,7 +87,7 @@ def main():
 
     en_content = fixtures.joinpath("amat_EN.dat").read_bytes()
     new_en_row = (
-        b"EN|999999|||N0NEW|L|L09999999|TESTUSER, NEW E|NEW|E|TESTUSER|||||"
+        b"EN|999999|||KJ4KLO|L|L09999999|TESTUSER, NEW E|NEW|E|TESTUSER|||||"
         b"1 New Ham Way|RINGGOLD|GA|30736|||000|0009999999|I||||||\n"
     )
     daily_en_path = Path("/tmp/daily_EN.dat")
@@ -111,10 +111,10 @@ def main():
         print("frn change_events rows:", rows)
         assert len(rows) == 1
         assert rows[0][0] == "amateur_license"
-        assert rows[0][1] == "N0NEW"
+        assert rows[0][1] == "KJ4KLO"
         assert rows[0][2] == "license_granted"
         assert rows[0][3] is None
-        assert rows[0][4] == "N0NEW"
+        assert rows[0][4] == "KJ4KLO"
         assert rows[0][5] == "0009999999"
 
     print("ALL WATCH-BY-FRN CHECKS PASSED")

@@ -16,7 +16,7 @@ from app.senders.base import SendError
 
 class TestRenderMessage(unittest.TestCase):
     def test_renders_expected_fields(self):
-        watch = {"subject_type": "callsign", "subject_value": "K0WNL"}
+        watch = {"subject_type": "callsign", "subject_value": "KM4TYD"}
         change_event = {
             "field_name": "license_status",
             "old_value": "A",
@@ -26,7 +26,7 @@ class TestRenderMessage(unittest.TestCase):
             "detected_at": "2026-09-02T00:00:00Z",
         }
         subject, body = render_message(watch, change_event)
-        self.assertIn("K0WNL", subject)
+        self.assertIn("KM4TYD", subject)
         self.assertIn("license_status", body)
         self.assertIn("Old value: A", body)
         self.assertIn("New value: E", body)
@@ -36,7 +36,7 @@ class TestRenderMessage(unittest.TestCase):
         change_event = {
             "field_name": "call_sign",
             "old_value": "",
-            "new_value": "K0WNL",
+            "new_value": "KM4TYD",
             "source_file": "l_am_mon.zip",
             "effective_date": "2026-09-02",
             "detected_at": "2026-09-02T00:00:00Z",

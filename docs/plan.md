@@ -972,6 +972,36 @@ commands for a given test run are chained into a single SSH invocation.
   `org.opencontainers.image.revision` label matching the deployed
   commit.
 
+- ✅ `test-fixtures-family-callsigns` — done. Updated the unit/integration
+  tests that use representative Amateur Radio test data to use the
+  user's own family callsigns (KM4TYD, N0OTZ, KJ4IKD, KI4NDF, AI4ZV,
+  K0NWT, N4EWT, KJ4KLO) in place of the prior fictional placeholders
+  (`K0WNL`, `K3RU`, `K5ZW`, `KA6CGD`, `KA8LJJ`, `KO6PAF`, `N0NEW`), used
+  once each across `ingestor/tests/fixtures/amat_{HD,EN,HS,AM}.dat`,
+  `ingestor/tests/{test_parser,test_differ,integration_test}.py`,
+  `api/tests/integration_test.py`, and `notifier/tests/{test_senders,
+  integration_test}.py`. Test-only change — no application code or
+  deployment changes involved. One scenario deliberately mirrors a real
+  fact: `api/tests/integration_test.py`'s "second amateur record sharing
+  the same FRN, to prove identity grouping" case now uses `N0OTZ` and
+  `KJ4IKD` (the user's real current and prior callsigns, which really do
+  share one FRN), with `entity_name`/`city`/`state`/`operator_class`
+  updated to match the user's real public licensee record (`SLOAN, RIAL
+  II`, Ringgold GA, class G); the FRN value itself was left as a new
+  clearly-fictional placeholder rather than reusing either the real FRN
+  or the original fixture's unrelated real stranger's FRN. All other
+  reused family callsigns kept their original fixture's fictional
+  name/address/FRN fields unchanged — only the callsign identifier was
+  swapped — to avoid fabricating personal details for family members
+  without their actual data. `ingestor/tests/integration_test.py`'s
+  "brand-new ham watching their FRN before a callsign exists" scenario
+  now uses `KJ4KLO` in place of the fictional `N0NEW`. Verified by
+  re-running all three services' `run_integration.sh` scripts in
+  disposable containers on `fcculs@10.64.3.39` after staging the updated
+  test trees — all unit and integration tests pass with the renamed
+  callsigns; no production deploy needed since no application code
+  changed.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

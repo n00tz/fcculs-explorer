@@ -68,7 +68,7 @@ def seed(webhook_url: str):
             cur.execute(
                 """
                 INSERT INTO watches (user_id, subject_type, subject_value, channel_id)
-                VALUES (%s, 'callsign', 'K0WNL', %s)
+                VALUES (%s, 'callsign', 'KM4TYD', %s)
                 """,
                 (user_id, channel_id),
             )
@@ -76,7 +76,7 @@ def seed(webhook_url: str):
             cur.execute(
                 """
                 INSERT INTO change_events (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date)
-                VALUES ('amateur_license', 'K0WNL', '232195', 'license_status', 'A', 'E', 'l_am_mon.zip', '2026-09-02')
+                VALUES ('amateur_license', 'KM4TYD', '232195', 'license_status', 'A', 'E', 'l_am_mon.zip', '2026-09-02')
                 RETURNING id
                 """
             )
@@ -116,7 +116,7 @@ def main():
 
     assert len(received_requests) == 1, received_requests
     payload = received_requests[0]
-    assert "K0WNL" in payload["subject"]
+    assert "KM4TYD" in payload["subject"]
     assert "license_status" in payload["body"]
     print("webhook received payload OK:", payload["subject"])
 

@@ -19,25 +19,25 @@ class TestParser(unittest.TestCase):
         rows = list(parse_dat_file(FIXTURES / "amat_HD.dat", schemas.AMAT_HD))
         self.assertEqual(len(rows), 5)
         first = rows[0]
-        self.assertEqual(first["call_sign"], "K0WNL")
+        self.assertEqual(first["call_sign"], "KM4TYD")
         self.assertEqual(first["license_status"], "A")
         self.assertEqual(first["grant_date"], "08/29/2026")
         self.assertNotIn("record_type", first)
 
     def test_amat_en_parses_frn_and_entity_name(self):
         rows = list(parse_dat_file(FIXTURES / "amat_EN.dat", schemas.AMAT_EN))
-        self.assertEqual(rows[0]["call_sign"], "K0WNL")
+        self.assertEqual(rows[0]["call_sign"], "KM4TYD")
         self.assertEqual(rows[0]["frn"], "0002204154")
         self.assertEqual(rows[0]["entity_name"], "BEAHM, DONALD E")
 
     def test_amat_am_parses_operator_class(self):
         rows = list(parse_dat_file(FIXTURES / "amat_AM.dat", schemas.AMAT_AM))
-        self.assertEqual(rows[0]["callsign"], "KO6PAF")
+        self.assertEqual(rows[0]["callsign"], "KM4TYD")
         self.assertEqual(rows[0]["operator_class"], "T")
 
     def test_amat_hs_field_count(self):
         rows = list(parse_dat_file(FIXTURES / "amat_HS.dat", schemas.AMAT_HS))
-        self.assertEqual(rows[0]["callsign"], "K0WNL")
+        self.assertEqual(rows[0]["callsign"], "KM4TYD")
         self.assertEqual(rows[0]["code"], "LIREN")
 
     def test_tower_ra_content_indicator_and_registration_number_order(self):

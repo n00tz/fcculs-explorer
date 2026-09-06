@@ -9,16 +9,16 @@ from differ import diff_rows
 
 class TestDiffer(unittest.TestCase):
     def test_no_diff_for_new_record(self):
-        self.assertEqual(diff_rows(None, {"call_sign": "K0WNL", "status": "A"}), [])
+        self.assertEqual(diff_rows(None, {"call_sign": "KM4TYD", "status": "A"}), [])
 
     def test_no_diff_when_identical(self):
-        old = {"call_sign": "K0WNL", "status": "A"}
-        new = {"call_sign": "K0WNL", "status": "A"}
+        old = {"call_sign": "KM4TYD", "status": "A"}
+        new = {"call_sign": "KM4TYD", "status": "A"}
         self.assertEqual(diff_rows(old, new), [])
 
     def test_detects_single_field_change(self):
-        old = {"call_sign": "K0WNL", "status": "A", "city": "GREAT BEND"}
-        new = {"call_sign": "K0WNL", "status": "E", "city": "GREAT BEND"}
+        old = {"call_sign": "KM4TYD", "status": "A", "city": "GREAT BEND"}
+        new = {"call_sign": "KM4TYD", "status": "E", "city": "GREAT BEND"}
         changes = diff_rows(old, new)
         self.assertEqual(changes, [("status", "A", "E")])
 
