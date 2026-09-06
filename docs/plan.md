@@ -256,6 +256,50 @@ live status):
   `.env` configuration reference table, first-time bootstrap-load
   instructions, verification steps, testing methodology, and FCC data
   licensing/attribution notes.
+- ✅ `quadlet-deployment` — done. `quadlet/` holds Podman Quadlet units
+  mirroring every compose.yaml service: `fcculs.network`, `pgdata.volume` /
+  `redisdata.volume` (names match the Compose volumes so data carries
+  over), `.container` units for postgres, redis, api, ingestor,
+  notifier-worker, notifier-dispatch, web, a `Type=oneshot
+  RemainAfterExit=yes` `fcculs-migrate` unit (with
+  `Requires=`/`After=` on dependents to reproduce Compose's
+  `service_completed_successfully` gating), and a manual-start
+  `fcculs-bootstrap` oneshot for the first-time full data load.
+  `deploy/install-quadlets.sh` renders the templates (`.env` values
+  substituted at install time, so no secrets live in the repo's units) into
+  `~/.config/containers/systemd/`, reloads systemd, warns if lingering is
+  off, and starts the stack in dependency order; it is idempotent.
+  `deploy/uninstall-quadlets.sh` stops/removes the units while keeping the
+  named volumes by default. README gained a parallel "Running with Podman
+  Quadlets" section.
+
+  **Verified on the house-voyager host (rootless Podman 4.9.3, systemd
+  255)**: enabled lingering, installed the units, and brought up the full
+  9-unit stack. `curl http://localhost:8080/` → 200 and
+  `curl http://localhost:8080/api/search?q=W1AW` → valid JSON through
+  Caddy's reverse proxy. Restarted every service unit individually with
+  `systemctl --user restart` and re-verified: all 7 long-running units came
+  back with no failed/inactive units and the same curl checks passed.
+  Uninstall + reinstall re-verified data persistence across the cycle
+  (volumes kept, stack healthy again). Real bugs found and fixed along the
+  way: (1) Quadlet 4.9 supports neither `Entrypoint=` nor `NetworkAlias=`
+  — the migrate job now mounts and runs `db/run_migrations.sh` (the
+  postgres image's entrypoint passes non-`postgres` commands straight
+  through), and containers use their Compose-matching short names
+  (`postgres`, `api`, ...) as `ContainerName` so network DNS matches the
+  Compose topology; (2) the SQL migrations were not actually idempotent
+  despite the README claiming so — re-running them (which systemd does on
+  unit restart) failed on existing tables/indexes, so every `CREATE` in
+  `db/*.sql` now uses `IF NOT EXISTS` (and the `ALTER TABLE ADD
+  CONSTRAINT` in 004 is wrapped in a `DO $$ ... IF NOT EXISTS` block); (3)
+  `Requires=` on infra services cascaded stops on restart (restarting
+  redis took down the notifiers permanently) — infra dependencies are now
+  `Wants=` (only the migrate gate keeps `Requires=`), and
+  `run_migrations.sh` retries transient DNS/connection failures so the
+  migrate oneshot survives a postgres restart race; (4) the API briefly
+  500'd right after a postgres restart on a stale pooled connection —
+  psycopg_pool recovers on its own within seconds, confirmed by immediate
+  successful retry.
 
 **Testing methodology established across all services**: since the local
 Windows dev machine has no Python/container runtime, all real testing runs

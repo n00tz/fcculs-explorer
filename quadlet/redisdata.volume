@@ -1,0 +1,8 @@
+# Persistent Redis (appendonly) data volume. Named `redisdata` to match
+# the Compose stack's named volume for the same migration-reuse reason as
+# pgdata.
+[Unit]
+Description=FCC ULS Explorer Redis data volume
+
+[Volume]
+VolumeName=redisdata

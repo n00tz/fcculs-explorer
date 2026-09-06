@@ -1,0 +1,27 @@
+[Unit]
+Description=FCC ULS Explorer API (FastAPI)
+After=fcculs-migrate.service
+Requires=fcculs-migrate.service
+
+[Container]
+Image=%API_IMAGE%
+ContainerName=api
+Network=fcculs.network
+# The API's pydantic-settings config reads FCCULS_* env vars; Postgres
+# credentials are interpolated at install time (see install-quadlets.sh).
+Environment=FCCULS_DATABASE_URL=postgresql://%POSTGRES_USER%:%POSTGRES_PASSWORD%@postgres:5432/%POSTGRES_DB%
+Environment=FCCULS_SESSION_SECRET=%SESSION_SECRET%
+Environment=FCCULS_MAGIC_LINK_BASE_URL=%PUBLIC_BASE_URL%
+Environment=FCCULS_SMTP_HOST=%SMTP_HOST%
+Environment=FCCULS_SMTP_PORT=%SMTP_PORT%
+Environment=FCCULS_SMTP_USER=%SMTP_USER%
+Environment=FCCULS_SMTP_PASSWORD=%SMTP_PASSWORD%
+Environment=FCCULS_SMTP_USE_TLS=%SMTP_USE_TLS%
+Environment=FCCULS_SMTP_FROM_ADDRESS=%SMTP_FROM_ADDRESS%
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

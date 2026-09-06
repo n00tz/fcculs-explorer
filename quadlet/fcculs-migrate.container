@@ -1,0 +1,39 @@
+# One-shot migration job: waits for Postgres to accept connections, then
+# applies every db/*.sql file in order (all migrations are idempotent).
+# Reproduces compose.yaml's
+# `depends_on: migrate: condition: service_completed_successfully` by
+# using systemd ordering: api/ingestor/notifier-worker/notifier-dispatch
+# units all declare `Requires=fcculs-migrate.service` +
+# `After=fcculs-migrate.service`, and systemd only counts a Type=oneshot
+# unit as "active" once ALL its ExecStart* steps exit 0 -- so dependents
+# will not start until every migration has applied successfully.
+[Unit]
+Description=FCC ULS Explorer database migrations
+# Ordering only (not Requires=): the migration script already waits for
+# Postgres via a pg_isready loop, so After= is sufficient for first-boot
+# ordering, and omitting Requires= means restarting the postgres unit does
+# NOT cascade-stop this oneshot (and through it, every dependent service).
+After=fcculs-postgres.service
+Wants=fcculs-postgres.service
+
+[Container]
+Image=docker.io/library/postgres:16-alpine
+ContainerName=fcculs-migrate
+Network=fcculs.network
+Volume=%REPO_DIR%/db:/migrations:ro,Z
+Environment=POSTGRES_USER=%POSTGRES_USER%
+Environment=POSTGRES_PASSWORD=%POSTGRES_PASSWORD%
+Environment=POSTGRES_DB=%POSTGRES_DB%
+# The postgres image's entrypoint initializes a new database; we only want
+# its psql/pg_isready client binaries, so run the mounted script directly.
+# Quadlet 4.9 doesn't support Entrypoint=, so the script is passed as the
+# command to the image's default /bin/sh entrypoint.
+Exec=/bin/sh /migrations/run_migrations.sh
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Restart=no
+
+[Install]
+WantedBy=default.target

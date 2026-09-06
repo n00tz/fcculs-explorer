@@ -1,0 +1,9 @@
+# Shared network for the whole FCC ULS Explorer stack, giving every
+# container DNS-based service-name resolution on this network (equivalent
+# to Compose's default network) -- e.g. `web`'s Caddyfile reaches the API
+# as `api:8000`.
+[Unit]
+Description=FCC ULS Explorer shared network
+
+[Network]
+NetworkName=fcculs

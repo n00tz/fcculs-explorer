@@ -1,0 +1,19 @@
+[Unit]
+Description=FCC ULS Explorer Redis
+After=fcculs-network.service redisdata-volume.service
+Requires=fcculs-network.service redisdata-volume.service
+
+[Container]
+Image=docker.io/library/redis:7-alpine
+ContainerName=redis
+Network=fcculs.network
+# Same command as compose.yaml: append-only persistence into the named volume.
+Exec=redis-server --appendonly yes
+Volume=redisdata.volume:/data
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

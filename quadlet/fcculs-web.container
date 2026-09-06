@@ -1,0 +1,21 @@
+[Unit]
+Description=FCC ULS Explorer web frontend (Caddy: static SPA + /api reverse proxy)
+After=fcculs-api.service
+# Wants (not Requires) so restarting the api unit doesn't cascade-stop web;
+# Caddy just serves 502s for /api until the API is back.
+Wants=fcculs-api.service
+
+[Container]
+Image=%WEB_IMAGE%
+ContainerName=fcculs-web
+Network=fcculs.network
+# Only service that publishes a host port -- a Cloudflare Tunnel on the
+# host points at http://localhost:8080.
+PublishPort=%PUBLISHED_PORT%:8080
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

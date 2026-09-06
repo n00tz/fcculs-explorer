@@ -1,0 +1,23 @@
+[Unit]
+Description=FCC ULS Explorer Postgres
+After=fcculs-network.service pgdata-volume.service
+Requires=fcculs-network.service pgdata-volume.service
+
+[Container]
+Image=docker.io/library/postgres:16-alpine
+# ContainerName matches the Compose service name so containers resolve by
+# the same DNS name (`postgres`) on the shared network -- Quadlet 4.9
+# lacks NetworkAlias=, so the container name itself provides the alias.
+ContainerName=postgres
+Network=fcculs.network
+Environment=POSTGRES_USER=%POSTGRES_USER%
+Environment=POSTGRES_PASSWORD=%POSTGRES_PASSWORD%
+Environment=POSTGRES_DB=%POSTGRES_DB%
+Volume=pgdata.volume:/var/lib/postgresql/data
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,8 @@
+# Persistent Postgres data volume. Named `pgdata` to match the Compose
+# stack's named volume, so an operator migrating an existing Compose
+# deployment can reuse the same volume without losing data.
+[Unit]
+Description=FCC ULS Explorer Postgres data volume
+
+[Volume]
+VolumeName=pgdata

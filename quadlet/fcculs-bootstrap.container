@@ -1,0 +1,24 @@
+# One-shot bootstrap load of the complete FCC weekly dumps (the equivalent
+# of Compose's `podman compose run --rm ingestor python scheduler.py
+# --bootstrap`). Quadlet has no direct `run` equivalent, so this is a
+# manual-start oneshot unit: it is NOT auto-started by install-quadlets.sh
+# and has no [Install] WantedBy -- run it explicitly on a fresh database:
+#     systemctl --user start fcculs-bootstrap.service
+# and watch progress with: journalctl --user -u fcculs-bootstrap.service -f
+[Unit]
+Description=FCC ULS Explorer bootstrap (one-time full data load)
+After=fcculs-migrate.service
+Requires=fcculs-migrate.service
+
+[Container]
+Image=%INGESTOR_IMAGE%
+ContainerName=fcculs-bootstrap
+Network=fcculs.network
+Environment=FCCULS_DATABASE_URL=postgresql://%POSTGRES_USER%:%POSTGRES_PASSWORD%@postgres:5432/%POSTGRES_DB%
+Exec=python scheduler.py --bootstrap
+
+[Service]
+Type=oneshot
+Restart=no
+
+# No [Install] section -- this unit is started manually, never enabled.

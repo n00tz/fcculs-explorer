@@ -1,0 +1,22 @@
+[Unit]
+Description=FCC ULS Explorer ingestor (daily APScheduler cron)
+After=fcculs-migrate.service
+Requires=fcculs-migrate.service
+
+[Container]
+Image=%INGESTOR_IMAGE%
+ContainerName=ingestor
+Network=fcculs.network
+Environment=FCCULS_DATABASE_URL=postgresql://%POSTGRES_USER%:%POSTGRES_PASSWORD%@postgres:5432/%POSTGRES_DB%
+Environment=FCCULS_INGEST_CRON_HOUR=%INGEST_CRON_HOUR%
+Environment=FCCULS_INGEST_CRON_MINUTE=%INGEST_CRON_MINUTE%
+# Default CMD in the ingestor Dockerfile runs `python scheduler.py`
+# (daily cron). For the first-time full data load use
+# fcculs-bootstrap.service instead (see README's Quadlet section).
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

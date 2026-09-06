@@ -13,7 +13,7 @@
 -- populated (non-blank) sample values once a larger sample is available,
 -- without blocking the rest of the schema.
 
-CREATE TABLE amat_hd (
+CREATE TABLE IF NOT EXISTS amat_hd (
     unique_system_identifier     BIGINT PRIMARY KEY,
     uls_file_number               TEXT,
     ebf_number                    TEXT,
@@ -75,10 +75,10 @@ CREATE TABLE amat_hd (
     updated_at                    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_amat_hd_call_sign ON amat_hd (call_sign);
-CREATE INDEX idx_amat_hd_call_sign_trgm ON amat_hd USING gin (call_sign gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_amat_hd_call_sign ON amat_hd (call_sign);
+CREATE INDEX IF NOT EXISTS idx_amat_hd_call_sign_trgm ON amat_hd USING gin (call_sign gin_trgm_ops);
 
-CREATE TABLE amat_en (
+CREATE TABLE IF NOT EXISTS amat_en (
     unique_system_identifier   BIGINT PRIMARY KEY,
     uls_file_number            TEXT,
     ebf_number                 TEXT,
@@ -111,11 +111,11 @@ CREATE TABLE amat_en (
     updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_amat_en_frn ON amat_en (frn);
-CREATE INDEX idx_amat_en_call_sign ON amat_en (call_sign);
-CREATE INDEX idx_amat_en_entity_name_trgm ON amat_en USING gin (entity_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_amat_en_frn ON amat_en (frn);
+CREATE INDEX IF NOT EXISTS idx_amat_en_call_sign ON amat_en (call_sign);
+CREATE INDEX IF NOT EXISTS idx_amat_en_entity_name_trgm ON amat_en USING gin (entity_name gin_trgm_ops);
 
-CREATE TABLE amat_am (
+CREATE TABLE IF NOT EXISTS amat_am (
     unique_system_identifier    BIGINT PRIMARY KEY,
     uls_file_num                TEXT,
     ebf_number                  TEXT,
@@ -136,10 +136,10 @@ CREATE TABLE amat_am (
     updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_amat_am_callsign_trgm ON amat_am USING gin (callsign gin_trgm_ops);
-CREATE INDEX idx_amat_am_trustee_callsign ON amat_am (trustee_callsign);
+CREATE INDEX IF NOT EXISTS idx_amat_am_callsign_trgm ON amat_am USING gin (callsign gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_amat_am_trustee_callsign ON amat_am (trustee_callsign);
 
-CREATE TABLE amat_hs (
+CREATE TABLE IF NOT EXISTS amat_hs (
     unique_system_identifier   BIGINT,
     uls_file_number            TEXT,
     callsign                   TEXT,
@@ -148,9 +148,9 @@ CREATE TABLE amat_hs (
     updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_amat_hs_usid ON amat_hs (unique_system_identifier);
+CREATE INDEX IF NOT EXISTS idx_amat_hs_usid ON amat_hs (unique_system_identifier);
 
-CREATE TABLE tower_ra (
+CREATE TABLE IF NOT EXISTS tower_ra (
     content_indicator                TEXT,
     file_number                      TEXT,
     registration_number              TEXT PRIMARY KEY,
@@ -202,10 +202,10 @@ CREATE TABLE tower_ra (
     updated_at                          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_tower_ra_usid ON tower_ra (unique_system_identifier);
-CREATE INDEX idx_tower_ra_status ON tower_ra (status_code);
+CREATE INDEX IF NOT EXISTS idx_tower_ra_usid ON tower_ra (unique_system_identifier);
+CREATE INDEX IF NOT EXISTS idx_tower_ra_status ON tower_ra (status_code);
 
-CREATE TABLE tower_en (
+CREATE TABLE IF NOT EXISTS tower_en (
     content_indicator          TEXT,
     file_number                TEXT,
     registration_number        TEXT,
@@ -234,11 +234,11 @@ CREATE TABLE tower_en (
     PRIMARY KEY (unique_system_identifier, registration_number)
 );
 
-CREATE INDEX idx_tower_en_frn ON tower_en (frn);
-CREATE INDEX idx_tower_en_reg_num ON tower_en (registration_number);
-CREATE INDEX idx_tower_en_entity_name_trgm ON tower_en USING gin (entity_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_tower_en_frn ON tower_en (frn);
+CREATE INDEX IF NOT EXISTS idx_tower_en_reg_num ON tower_en (registration_number);
+CREATE INDEX IF NOT EXISTS idx_tower_en_entity_name_trgm ON tower_en USING gin (entity_name gin_trgm_ops);
 
-CREATE TABLE tower_co (
+CREATE TABLE IF NOT EXISTS tower_co (
     content_indicator          TEXT,
     file_number                TEXT,
     registration_number         TEXT,
@@ -260,7 +260,7 @@ CREATE TABLE tower_co (
     PRIMARY KEY (unique_system_identifier, registration_number, coordinate_type)
 );
 
-CREATE TABLE tower_hs (
+CREATE TABLE IF NOT EXISTS tower_hs (
     unique_system_identifier   BIGINT,
     registration_number        TEXT,
     file_number                TEXT,
@@ -269,4 +269,4 @@ CREATE TABLE tower_hs (
     updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_tower_hs_usid ON tower_hs (unique_system_identifier);
+CREATE INDEX IF NOT EXISTS idx_tower_hs_usid ON tower_hs (unique_system_identifier);

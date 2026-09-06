@@ -1,0 +1,31 @@
+# Same image as fcculs-notifier-worker, different role (mirrors
+# compose.yaml's notifier-dispatch service): polls change_events for new
+# matches against active watches and enqueues delivery jobs, looping on
+# DISPATCH_INTERVAL_SECONDS.
+[Unit]
+Description=FCC ULS Explorer notifier dispatcher (change_event -> watch matcher)
+After=fcculs-migrate.service fcculs-redis.service
+Requires=fcculs-migrate.service
+Wants=fcculs-redis.service
+
+[Container]
+Image=%NOTIFIER_IMAGE%
+ContainerName=fcculs-notifier-dispatch
+Network=fcculs.network
+Environment=FCCULS_DATABASE_URL=postgresql://%POSTGRES_USER%:%POSTGRES_PASSWORD%@postgres:5432/%POSTGRES_DB%
+Environment=FCCULS_REDIS_URL=redis://redis:6379/0
+Environment=FCCULS_SMTP_HOST=%SMTP_HOST%
+Environment=FCCULS_SMTP_PORT=%SMTP_PORT%
+Environment=FCCULS_SMTP_USER=%SMTP_USER%
+Environment=FCCULS_SMTP_PASSWORD=%SMTP_PASSWORD%
+Environment=FCCULS_SMTP_USE_TLS=%SMTP_USE_TLS%
+Environment=FCCULS_SMTP_FROM_ADDRESS=%SMTP_FROM_ADDRESS%
+Environment=FCCULS_MAX_DELIVERY_ATTEMPTS=%MAX_DELIVERY_ATTEMPTS%
+Exec=/bin/sh -c "while true; do python -m app.dispatch; sleep %DISPATCH_INTERVAL_SECONDS%; done"
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

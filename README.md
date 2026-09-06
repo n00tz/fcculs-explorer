@@ -120,6 +120,105 @@ curl -s http://localhost:8080/api/search?q=W1AW      # proxied API call
 disposable Podman pod, not the Compose stack itself) — useful as a
 reference when validating a rebuilt image outside of Compose.
 
+## Running with Podman Quadlets (systemd-managed)
+
+An alternative, additive deployment path alongside the Compose stack:
+instead of a running `podman compose` process, each service is a
+systemd-managed container unit (Podman Quadlets), supervised by the user
+manager. The stack survives reboots and host logouts (with lingering
+enabled) with no extra tooling. Still single-host, still rootless.
+
+### Prerequisites
+
+- Rootless Podman 4.9+ (developed and verified against 4.9.3).
+- Lingering enabled for your user, so the user systemd manager (and the
+  stack) survives logout/reboot:
+  `loginctl enable-linger $USER`
+- The application images built locally — Quadlet has no `build:` directive,
+  so build them from the repo root once (and after any code change):
+
+  ```bash
+  podman build -t localhost/fcculs-api:latest      ./api
+  podman build -t localhost/fcculs-ingestor:latest ./ingestor
+  podman build -t localhost/fcculs-notifier:latest ./notifier
+  podman build -t localhost/fcculs-web:latest      ./web
+  ```
+
+  (Different image names/tags can be set via `API_IMAGE`,
+  `INGESTOR_IMAGE`, `NOTIFIER_IMAGE`, `WEB_IMAGE` in `.env`.)
+- A configured `.env` (same file as the Compose path; `cp .env.example
+  .env` and fill in `POSTGRES_PASSWORD`, `SESSION_SECRET`, `SMTP_*`).
+
+### Install / start the stack
+
+```bash
+bash deploy/install-quadlets.sh
+```
+
+The script renders `quadlet/*` into `~/.config/containers/systemd/`
+(substituting your `.env` values — secrets are never committed into the
+repo's unit templates), runs `systemctl --user daemon-reload`, warns if
+lingering is disabled, and starts the units in dependency order. It is
+idempotent: re-run it after editing a unit in `quadlet/` or changing
+`.env`.
+
+### Status, logs, restarts
+
+```bash
+systemctl --user status fcculs-api.service        # any unit
+journalctl --user -u fcculs-api.service -f        # follow logs
+systemctl --user restart fcculs-api.service       # restart one service
+```
+
+Unit names: `fcculs-network`, `pgdata-volume`, `redisdata-volume`,
+`fcculs-postgres`, `fcculs-redis`, `fcculs-migrate` (oneshot), `fcculs-api`,
+`fcculs-ingestor`, `fcculs-notifier-worker`, `fcculs-notifier-dispatch`,
+`fcculs-web`. On the shared `fcculs` network, containers resolve each other
+by their Compose-matching names (`postgres`, `redis`, `api`), so the
+existing `Caddyfile` (`reverse_proxy api:8000`) works unchanged.
+
+### First-time bootstrap load
+
+`fcculs-bootstrap.service` is a manual-start oneshot unit (never
+auto-started). On a fresh database:
+
+```bash
+systemctl --user start fcculs-bootstrap.service
+journalctl --user -u fcculs-bootstrap.service -f   # watch progress
+```
+
+### Updating after a rebuild
+
+```bash
+podman build -t localhost/fcculs-api:latest ./api   # rebuild what changed
+systemctl --user restart fcculs-api.service         # restart just that unit
+```
+
+Or re-run `deploy/install-quadlets.sh` after editing unit templates.
+
+### Uninstall
+
+```bash
+bash deploy/uninstall-quadlets.sh            # stops/removes units; keeps data
+bash deploy/uninstall-quadlets.sh --volumes  # also DELETES pgdata/redisdata
+bash deploy/uninstall-quadlets.sh --images   # also deletes built images
+```
+
+### Differences from the Compose path
+
+Both paths run the same images, same named volumes (`pgdata`, `redisdata` —
+so you can migrate between them without losing data), and same `.env`. The
+Quadlet path replaces Compose's orchestration with systemd: units start on
+boot automatically (no `podman compose up` needed after a reboot), and each
+service is supervised/restarted by systemd. The migration job is a
+`Type=oneshot, RemainAfterExit=yes` unit; app units declare
+`Requires=fcculs-migrate.service` + `After=fcculs-migrate.service` to
+reproduce Compose's `depends_on: service_completed_successfully` gating.
+One caveat: manually restarting `fcculs-migrate.service` will stop the
+dependent app units (Requires propagation) — restart them afterward, or
+just re-run `deploy/install-quadlets.sh`.
+
+
 ## Configuration Reference (`.env`)
 
 | Variable | Used by | Purpose |
