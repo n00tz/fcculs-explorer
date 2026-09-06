@@ -209,6 +209,49 @@ def main():
         assert resp.status_code == 401
         print("auth-required enforcement OK")
 
+        # --- hidden /admin panel: login, list, edit, delete ---
+        import app.admin_auth as admin_auth_module
+
+        known_password = "itest-admin-password"
+        admin_auth_module._admin_password_hash = None
+        admin_auth_module.init_admin_password()  # rotate once so tests don't depend on a stale hash
+        # Force a known password rather than parsing logs here (log-derived
+        # discovery is covered by tests/test_admin_auth.py); this block only
+        # needs a valid session to exercise the admin CRUD endpoints.
+        from app.security import hash_token
+
+        admin_auth_module._admin_password_hash = hash_token(known_password)
+
+        resp = client.post("/api/admin/login", json={"password": "wrong"})
+        assert resp.status_code == 401, resp.text
+
+        resp = client.post("/api/admin/login", json={"password": known_password})
+        assert resp.status_code == 200, resp.text
+        assert "fcculs_admin_session" in resp.cookies
+        print("admin login OK")
+
+        resp = client.get("/api/admin/users")
+        assert resp.status_code == 200, resp.text
+        users = resp.json()["items"]
+        assert any(u["email"] == "n0test@example.com" for u in users)
+        target_user = next(u for u in users if u["email"] == "n0test@example.com")
+        print("admin users list OK:", len(users))
+
+        resp = client.patch(f"/api/admin/users/{target_user['id']}", json={"email": "n0test-edited@example.com"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["email"] == "n0test-edited@example.com"
+        print("admin user edit OK")
+
+        resp = client.delete(f"/api/admin/users/{target_user['id']}")
+        assert resp.status_code == 204, resp.text
+        print("admin user delete OK")
+
+        resp = client.post("/api/admin/logout")
+        assert resp.status_code == 204
+        resp = client.get("/api/admin/users")
+        assert resp.status_code == 401
+        print("admin auth-required enforcement OK")
+
     print("ALL API INTEGRATION CHECKS PASSED")
 
 

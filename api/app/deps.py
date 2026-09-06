@@ -5,7 +5,7 @@ from psycopg import AsyncConnection
 
 from .config import settings
 from .db import get_db
-from .security import read_session_cookie
+from .security import read_admin_session_cookie, read_session_cookie
 
 
 async def get_optional_user(
@@ -26,3 +26,9 @@ async def get_current_user(user: dict | None = Depends(get_optional_user)) -> di
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return user
+
+
+async def get_current_admin(request: Request) -> None:
+    cookie_value = request.cookies.get(settings.admin_session_cookie_name)
+    if not cookie_value or not read_admin_session_cookie(cookie_value):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin authentication required")

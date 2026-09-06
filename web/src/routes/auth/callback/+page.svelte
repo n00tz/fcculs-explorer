@@ -1,6 +1,7 @@
 <script>
 	import { page } from '$app/stores';
 	import { get } from '$lib/api.js';
+	import { refreshUser } from '$lib/auth.js';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 
@@ -18,6 +19,7 @@
 			// GET with credentials so the Set-Cookie from a successful
 			// verification is stored for this origin.
 			await get('/auth/verify', { token });
+			await refreshUser();
 			status = 'done';
 			setTimeout(() => goto('/watches'), 800);
 		} catch (e) {

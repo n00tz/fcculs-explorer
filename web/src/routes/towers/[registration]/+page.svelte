@@ -41,23 +41,57 @@
 		<span class="pill">{detail.registration.status_code}</span>
 	</h1>
 
+	<h2>Registration</h2>
 	<div class="card detail-grid">
-		<div><div class="label">Structure Type</div><div class="value">{detail.registration.structure_type ?? '—'}</div></div>
-		<div><div class="label">Location</div><div class="value">{detail.registration.structure_city ?? ''}, {detail.registration.structure_state_code ?? ''}</div></div>
-		<div><div class="label">Height AGL</div><div class="value">{detail.registration.overall_height_above_ground ?? '—'}</div></div>
-		<div><div class="label">Height AMSL</div><div class="value">{detail.registration.overall_height_amsl ?? '—'}</div></div>
-		<div><div class="label">Constructed</div><div class="value">{detail.registration.date_constructed ?? '—'}</div></div>
+		<div><div class="label">Structure Type</div><div class="value">{#if detail.registration.structure_type}<a href={`/towers?structureType=${encodeURIComponent(detail.registration.structure_type)}`}>{detail.registration.structure_type}</a>{:else}—{/if}</div></div>
+		<div><div class="label">Status</div><div class="value">{#if detail.registration.status_code}<a href={`/towers?status=${detail.registration.status_code}`}>{detail.registration.status_code}</a>{:else}—{/if}</div></div>
+		<div>
+			<div class="label">Location</div>
+			<div class="value">
+				{#if detail.registration.structure_city}<a href={`/towers?city=${encodeURIComponent(detail.registration.structure_city)}`}>{detail.registration.structure_city}</a>,{/if}
+				{#if detail.registration.structure_state_code}<a href={`/towers?state=${detail.registration.structure_state_code}`}>{detail.registration.structure_state_code}</a>{/if}
+				{#if !detail.registration.structure_city && !detail.registration.structure_state_code}—{/if}
+			</div>
+		</div>
+		<div><div class="label">Street Address</div><div class="value">{detail.registration.structure_street_address ?? '—'}</div></div>
+		<div><div class="label">County</div><div class="value">{detail.registration.county_code ?? '—'}</div></div>
+		<div><div class="label">ZIP</div><div class="value">{detail.registration.zip_code ?? '—'}</div></div>
+		<div><div class="label">Height AGL (ft)</div><div class="value">{detail.registration.overall_height_above_ground ?? '—'}</div></div>
+		<div><div class="label">Height AMSL (ft)</div><div class="value">{detail.registration.overall_height_amsl ?? '—'}</div></div>
+		<div><div class="label">Ground Elevation</div><div class="value">{detail.registration.ground_elevation ?? '—'}</div></div>
+		<div><div class="label">Application Purpose</div><div class="value">{detail.registration.application_purpose ?? '—'}</div></div>
+		<div><div class="label">Previous Purpose</div><div class="value">{detail.registration.previous_purpose ?? '—'}</div></div>
+		<div><div class="label">Date Entered</div><div class="value">{detail.registration.date_entered ?? '—'}</div></div>
+		<div><div class="label">Date Received</div><div class="value">{detail.registration.date_received ?? '—'}</div></div>
+		<div><div class="label">Date Issued</div><div class="value">{detail.registration.date_issued ?? '—'}</div></div>
+		<div><div class="label">Date Constructed</div><div class="value">{detail.registration.date_constructed ?? '—'}</div></div>
+		<div><div class="label">Date Dismantled</div><div class="value">{detail.registration.date_dismantled ?? '—'}</div></div>
 		<div><div class="label">FAA Study #</div><div class="value">{detail.registration.faa_study_number ?? '—'}</div></div>
+		<div><div class="label">FAA Determination Date</div><div class="value">{detail.registration.date_faa_determination_issued ?? '—'}</div></div>
+		<div><div class="label">FAA Circular #</div><div class="value">{detail.registration.faa_circular_number ?? '—'}</div></div>
+		<div><div class="label">Painting/Lighting</div><div class="value">{detail.registration.painting_and_lighting ?? '—'}</div></div>
+		<div><div class="label">Proposed Marking/Lighting</div><div class="value">{detail.registration.proposed_marking_and_lighting ?? '—'}</div></div>
+		<div><div class="label">NEPA Flag</div><div class="value">{detail.registration.nepa_flag ?? '—'}</div></div>
 	</div>
 
 	{#if detail.entities.length > 0}
 		<h2>Owners / Contacts</h2>
 		<div class="card">
 			<table>
-				<thead><tr><th>Entity</th><th>FRN</th><th>Location</th></tr></thead>
+				<thead><tr><th>Entity</th><th>Type</th><th>FRN</th><th>Location</th><th>Phone</th><th>Contact</th></tr></thead>
 				<tbody>
 					{#each detail.entities as e}
-						<tr><td>{e.entity_name}</td><td>{e.frn ?? '—'}</td><td>{e.city ?? ''}, {e.state ?? ''}</td></tr>
+						<tr>
+							<td>{e.entity_name}</td>
+							<td>{e.entity_type ?? '—'}</td>
+							<td>{#if e.frn}<a href={`/identity/frn/${e.frn}`}>{e.frn}</a>{:else}—{/if}</td>
+							<td>
+								{#if e.city}<a href={`/towers?city=${encodeURIComponent(e.city)}`}>{e.city}</a>,{/if}
+								{#if e.state}<a href={`/towers?state=${e.state}`}>{e.state}</a>{/if}
+							</td>
+							<td>{e.phone ?? '—'}</td>
+							<td>{[e.first_name, e.mi, e.last_name, e.suffix].filter(Boolean).join(' ') || '—'}</td>
+						</tr>
 					{/each}
 				</tbody>
 			</table>

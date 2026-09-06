@@ -1,6 +1,7 @@
 <script>
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
+	import { page as pageStore } from '$app/stores';
 
 	let callsign = '';
 	let name = '';
@@ -15,6 +16,19 @@
 	let total = 0;
 	let loading = false;
 	let error = '';
+
+	// Support crosslinks from detail pages (e.g. clicking a state/class on a
+	// callsign's detail page) by pre-filling filters from the URL's query
+	// params on first load.
+	function readFiltersFromUrl() {
+		const params = $pageStore.url.searchParams;
+		callsign = params.get('callsign') ?? '';
+		name = params.get('name') ?? '';
+		city = params.get('city') ?? '';
+		state = params.get('state') ?? '';
+		statusCode = params.get('status') ?? '';
+		operatorClass = params.get('class') ?? '';
+	}
 
 	async function load() {
 		loading = true;
@@ -44,6 +58,14 @@
 		load();
 	}
 
+	function setFilter(field, value) {
+		if (field === 'status') statusCode = value ?? '';
+		else if (field === 'class') operatorClass = value ?? '';
+		else if (field === 'city') city = value ?? '';
+		else if (field === 'state') state = value ?? '';
+		applyFilters();
+	}
+
 	function nextPage() {
 		if (page * pageSize < total) {
 			page += 1;
@@ -57,7 +79,10 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		readFiltersFromUrl();
+		load();
+	});
 </script>
 
 <svelte:head>
@@ -100,10 +125,22 @@
 		{#each items as row}
 			<tr>
 				<td><a href={`/amateur/${row.call_sign}`}>{row.call_sign}</a></td>
-				<td><span class={`pill status-${row.license_status}`}>{row.license_status}</span></td>
-				<td>{row.operator_class ?? '—'}</td>
+				<td>
+					<button class="pill-link" on:click={() => setFilter('status', row.license_status)}>
+						<span class={`pill status-${row.license_status}`}>{row.license_status}</span>
+					</button>
+				</td>
+				<td>
+					{#if row.operator_class}
+						<button class="pill-link" on:click={() => setFilter('class', row.operator_class)}>{row.operator_class}</button>
+					{:else}—{/if}
+				</td>
 				<td>{row.entity_name ?? '—'}</td>
-				<td>{row.city ? `${row.city}, ${row.state}` : row.state ?? '—'}</td>
+				<td>
+					{#if row.city}<button class="pill-link" on:click={() => setFilter('city', row.city)}>{row.city}</button>,{/if}
+					{#if row.state}<button class="pill-link" on:click={() => setFilter('state', row.state)}>{row.state}</button>{/if}
+					{#if !row.city && !row.state}—{/if}
+				</td>
 				<td>{row.grant_date ?? '—'}</td>
 				<td>{row.expired_date ?? '—'}</td>
 			</tr>

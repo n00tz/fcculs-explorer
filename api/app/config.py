@@ -12,6 +12,16 @@ class Settings(BaseSettings):
     session_cookie_name: str = "fcculs_session"
     session_max_age_seconds: int = 60 * 60 * 24 * 30  # 30 days
 
+    # Hidden /admin panel session. There is no admin password setting here on
+    # purpose: a random superuser password is generated once per API process
+    # start and only ever printed to the container's stdout/log (see
+    # app.admin_auth) -- it is never stored in the database or config, so
+    # the only way to obtain it is having log access to the running
+    # container, per the deliberately narrow threat model requested.
+    admin_session_cookie_name: str = "fcculs_admin_session"
+    admin_session_max_age_seconds: int = 60 * 60 * 12  # 12 hours
+
+
     # Magic-link auth.
     #
     # magic_link_base_url is only a FALLBACK: by default (see

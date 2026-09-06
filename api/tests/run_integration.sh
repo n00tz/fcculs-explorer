@@ -36,7 +36,7 @@ podman run --rm --pod fcculs-api-itest \
   -v /tmp/api_full:/app:Z \
   -e FCCULS_DATABASE_URL=postgresql://postgres:test@localhost:5432/fcculs_test \
   docker.io/library/python:3.12-slim \
-  bash -c "pip install --quiet -r /app/requirements.txt && cd /app && python3 -m pytest tests/test_security.py tests/test_mailer.py tests/test_auth_base_url.py -v && python3 tests/integration_test.py"
+  bash -c "pip install --quiet -r /app/requirements.txt && cd /app && python3 -m pytest tests/test_security.py tests/test_mailer.py tests/test_auth_base_url.py tests/test_admin_auth.py -v && python3 tests/integration_test.py"
 
 # tests/real_smtp_smoke_test.py is a real-SMTP-listener smoke test (not
 # auto-run here, same as integration_test.py's real-Postgres model): it

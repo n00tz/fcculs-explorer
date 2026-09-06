@@ -41,20 +41,81 @@
 		<span class={`pill status-${detail.header.license_status}`}>{detail.header.license_status}</span>
 	</h1>
 
+	<h2>License</h2>
 	<div class="card detail-grid">
-		<div><div class="label">Licensee</div><div class="value">{detail.entity?.entity_name ?? '—'}</div></div>
-		<div><div class="label">Location</div><div class="value">{detail.entity ? `${detail.entity.city ?? ''}, ${detail.entity.state ?? ''}` : '—'}</div></div>
-		<div><div class="label">FRN</div><div class="value">{detail.entity?.frn ?? '—'}</div></div>
-		<div><div class="label">Operator Class</div><div class="value">{detail.amateur_specific?.operator_class ?? '—'}</div></div>
-		<div><div class="label">Group Code</div><div class="value">{detail.amateur_specific?.group_code ?? '—'}</div></div>
-		<div><div class="label">Trustee</div><div class="value">{detail.amateur_specific?.trustee_callsign ?? '—'}</div></div>
+		<div><div class="label">Status</div><div class="value">{#if detail.header.license_status}<a href={`/amateur?status=${detail.header.license_status}`}>{detail.header.license_status}</a>{:else}—{/if}</div></div>
+		<div><div class="label">Radio Service Code</div><div class="value">{detail.header.radio_service_code ?? '—'}</div></div>
+		<div><div class="label">ULS File Number</div><div class="value">{detail.header.uls_file_number ?? '—'}</div></div>
+		<div><div class="label">ULS System ID</div><div class="value">{detail.header.unique_system_identifier}</div></div>
 		<div><div class="label">Grant Date</div><div class="value">{detail.header.grant_date ?? '—'}</div></div>
 		<div><div class="label">Expires</div><div class="value">{detail.header.expired_date ?? '—'}</div></div>
-		<div><div class="label">ULS System ID</div><div class="value">{detail.header.unique_system_identifier}</div></div>
+		<div><div class="label">Effective Date</div><div class="value">{detail.header.effective_date ?? '—'}</div></div>
+		<div><div class="label">Last Action Date</div><div class="value">{detail.header.last_action_date ?? '—'}</div></div>
+		<div><div class="label">Cancellation Date</div><div class="value">{detail.header.cancellation_date ?? '—'}</div></div>
+		<div><div class="label">Eligibility Rule</div><div class="value">{detail.header.eligibility_rule_num ?? '—'}</div></div>
+	</div>
+
+	<h2>Licensee</h2>
+	<div class="card detail-grid">
+		<div><div class="label">Licensee / Entity</div><div class="value">{detail.entity?.entity_name ?? '—'}</div></div>
+		<div><div class="label">Contact Name</div><div class="value">{[detail.entity?.first_name, detail.entity?.mi, detail.entity?.last_name, detail.entity?.suffix].filter(Boolean).join(' ') || '—'}</div></div>
+		<div><div class="label">FRN</div><div class="value">{#if detail.entity?.frn}<a href={`/identity/frn/${detail.entity.frn}`}>{detail.entity.frn}</a>{:else}—{/if}</div></div>
+		<div><div class="label">Entity Type</div><div class="value">{detail.entity?.entity_type ?? '—'}</div></div>
+		<div><div class="label">Applicant Type</div><div class="value">{detail.entity?.applicant_type_code ?? '—'}</div></div>
+		<div><div class="label">Street Address</div><div class="value">{[detail.entity?.street_address, detail.entity?.po_box, detail.entity?.attention_line].filter(Boolean).join(', ') || '—'}</div></div>
+		<div>
+			<div class="label">Location</div>
+			<div class="value">
+				{#if detail.entity?.city}<a href={`/amateur?city=${encodeURIComponent(detail.entity.city)}`}>{detail.entity.city}</a>,{/if}
+				{#if detail.entity?.state}<a href={`/amateur?state=${detail.entity.state}`}>{detail.entity.state}</a>{/if}
+				{#if !detail.entity?.city && !detail.entity?.state}—{/if}
+				{detail.entity?.zip_code ?? ''}
+			</div>
+		</div>
+		<div><div class="label">Phone</div><div class="value">{detail.entity?.phone ?? '—'}</div></div>
+		<div><div class="label">Fax</div><div class="value">{detail.entity?.fax ?? '—'}</div></div>
+		<div><div class="label">Email</div><div class="value">{detail.entity?.email ?? '—'}</div></div>
+		<div><div class="label">Status</div><div class="value">{detail.entity?.status_code ?? '—'} {detail.entity?.status_date ? `(${detail.entity.status_date})` : ''}</div></div>
+	</div>
+
+	<h2>Amateur Details</h2>
+	<div class="card detail-grid">
+		<div><div class="label">Operator Class</div><div class="value">{#if detail.amateur_specific?.operator_class}<a href={`/amateur?class=${detail.amateur_specific.operator_class}`}>{detail.amateur_specific.operator_class}</a>{:else}—{/if}</div></div>
+		<div><div class="label">Group Code</div><div class="value">{detail.amateur_specific?.group_code ?? '—'}</div></div>
+		<div><div class="label">Region Code</div><div class="value">{detail.amateur_specific?.region_code ?? '—'}</div></div>
+		<div>
+			<div class="label">Trustee</div>
+			<div class="value">
+				{#if detail.amateur_specific?.trustee_callsign}
+					<a href={`/amateur/${detail.amateur_specific.trustee_callsign}`}>{detail.amateur_specific.trustee_callsign}</a>
+					{detail.amateur_specific.trustee_name ? `(${detail.amateur_specific.trustee_name})` : ''}
+				{:else}
+					—
+				{/if}
+			</div>
+		</div>
+		<div><div class="label">Trustee Indicator</div><div class="value">{detail.amateur_specific?.trustee_indicator ?? '—'}</div></div>
+		<div>
+			<div class="label">Previous Callsign</div>
+			<div class="value">
+				{#if detail.amateur_specific?.previous_callsign}
+					<a href={`/amateur/${detail.amateur_specific.previous_callsign}`}>{detail.amateur_specific.previous_callsign}</a>
+				{:else}
+					—
+				{/if}
+				{detail.amateur_specific?.previous_operator_class ? `(class ${detail.amateur_specific.previous_operator_class})` : ''}
+			</div>
+		</div>
+		<div><div class="label">Vanity Relationship</div><div class="value">{detail.amateur_specific?.vanity_relationship ?? '—'}</div></div>
+		<div><div class="label">Systematic Callsign Change</div><div class="value">{detail.amateur_specific?.systematic_callsign_change ?? '—'}</div></div>
+		<div><div class="label">Vanity Callsign Change</div><div class="value">{detail.amateur_specific?.vanity_callsign_change ?? '—'}</div></div>
 	</div>
 
 	{#if detail.related_identities.length > 0}
-		<h2>Related Identities <span class="muted">(same FRN)</span></h2>
+		<h2>
+			Related Identities <span class="muted">(same FRN)</span>
+			{#if detail.entity?.frn}<a href={`/identity/frn/${detail.entity.frn}`} class="muted">view all →</a>{/if}
+		</h2>
 		<div class="card">
 			<table>
 				<thead><tr><th>Type</th><th>Identifier</th><th>Name</th></tr></thead>

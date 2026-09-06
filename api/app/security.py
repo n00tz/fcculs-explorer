@@ -11,6 +11,8 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from .config import settings
 
 _serializer = URLSafeTimedSerializer(settings.session_secret, salt="fcculs-session")
+_admin_serializer = URLSafeTimedSerializer(settings.session_secret, salt="fcculs-admin-session")
+
 
 
 def generate_magic_link_token() -> tuple[str, str, datetime]:
@@ -39,3 +41,21 @@ def read_session_cookie(cookie_value: str) -> int | None:
     except (BadSignature, SignatureExpired):
         return None
     return data.get("user_id")
+
+
+def create_admin_session_cookie() -> str:
+    """Admin sessions carry no identity beyond "is the admin" -- there's only
+    ever one superuser, authenticated by the process-generated password (see
+    app.admin_auth), not by a user row. Signed with a distinct salt so an
+    admin cookie can never be replayed as a regular user session or vice
+    versa."""
+    return _admin_serializer.dumps({"admin": True})
+
+
+def read_admin_session_cookie(cookie_value: str) -> bool:
+    """Return True if cookie_value is a valid, unexpired admin session."""
+    try:
+        data = _admin_serializer.loads(cookie_value, max_age=settings.admin_session_max_age_seconds)
+    except (BadSignature, SignatureExpired):
+        return False
+    return bool(data.get("admin"))

@@ -5,13 +5,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .admin_auth import init_admin_password
 from .config import settings
 from .db import close_pool, open_pool
-from .routers import amateur, auth, channels, identity, search, towers, watches
+from .routers import admin, amateur, auth, channels, identity, search, towers, watches
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_admin_password()
     await open_pool()
     yield
     await close_pool()
@@ -34,6 +36,7 @@ app.include_router(identity.router)
 app.include_router(auth.router)
 app.include_router(watches.router)
 app.include_router(channels.router)
+app.include_router(admin.router)
 
 
 @app.get("/api/healthz")

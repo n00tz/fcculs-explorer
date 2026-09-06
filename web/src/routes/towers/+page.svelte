@@ -1,6 +1,7 @@
 <script>
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
+	import { page as pageStore } from '$app/stores';
 
 	let registrationNumber = '';
 	let structureType = '';
@@ -18,6 +19,15 @@
 	let total = 0;
 	let loading = false;
 	let error = '';
+
+	function readFiltersFromUrl() {
+		const params = $pageStore.url.searchParams;
+		registrationNumber = params.get('registrationNumber') ?? '';
+		structureType = params.get('structureType') ?? '';
+		city = params.get('city') ?? '';
+		state = params.get('state') ?? '';
+		statusCode = params.get('status') ?? '';
+	}
 
 	async function load() {
 		loading = true;
@@ -49,6 +59,15 @@
 		page = 1;
 		load();
 	}
+
+	function setFilter(field, value) {
+		if (field === 'structureType') structureType = value ?? '';
+		else if (field === 'status') statusCode = value ?? '';
+		else if (field === 'city') city = value ?? '';
+		else if (field === 'state') state = value ?? '';
+		applyFilters();
+	}
+
 	function nextPage() {
 		if (page * pageSize < total) {
 			page += 1;
@@ -62,7 +81,10 @@
 		}
 	}
 
-	onMount(load);
+	onMount(() => {
+		readFiltersFromUrl();
+		load();
+	});
 </script>
 
 <svelte:head>
@@ -106,9 +128,21 @@
 		{#each items as row}
 			<tr>
 				<td><a href={`/towers/${row.registration_number}`}>{row.registration_number}</a></td>
-				<td>{row.structure_type ?? '—'}</td>
-				<td><span class="pill">{row.status_code ?? '—'}</span></td>
-				<td>{row.structure_city ? `${row.structure_city}, ${row.structure_state_code}` : row.structure_state_code ?? '—'}</td>
+				<td>
+					{#if row.structure_type}
+						<button class="pill-link" on:click={() => setFilter('structureType', row.structure_type)}>{row.structure_type}</button>
+					{:else}—{/if}
+				</td>
+				<td>
+					<button class="pill-link" on:click={() => setFilter('status', row.status_code)}>
+						<span class="pill">{row.status_code ?? '—'}</span>
+					</button>
+				</td>
+				<td>
+					{#if row.structure_city}<button class="pill-link" on:click={() => setFilter('city', row.structure_city)}>{row.structure_city}</button>,{/if}
+					{#if row.structure_state_code}<button class="pill-link" on:click={() => setFilter('state', row.structure_state_code)}>{row.structure_state_code}</button>{/if}
+					{#if !row.structure_city && !row.structure_state_code}—{/if}
+				</td>
 				<td>{row.overall_height_above_ground ?? '—'}</td>
 				<td>{row.date_constructed ?? '—'}</td>
 			</tr>
