@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg import AsyncConnection
 
 from ..db import get_db
+from ..history_codes import describe_history_code
 from ..pagination import Page, PageParams
 
 router = APIRouter(prefix="/api/amateur", tags=["amateur"])
@@ -10,7 +11,10 @@ router = APIRouter(prefix="/api/amateur", tags=["amateur"])
 
 @router.get("", response_model=Page)
 async def browse_amateur(
-    state: str | None = Query(None, min_length=2, max_length=2),
+    callsign: str | None = Query(None),
+    name: str | None = Query(None),
+    city: str | None = Query(None),
+    state: str | None = Query(None),
     status_code: str | None = Query(None, alias="status"),
     operator_class: str | None = Query(None, alias="class"),
     page_params: PageParams = Depends(),
@@ -18,9 +22,22 @@ async def browse_amateur(
 ):
     conditions = []
     params: dict = {}
+    # Partial (ILIKE) matching on the human-facing fields so "ring", "GA",
+    # "N0O" etc. all work, per the browse/filter requirement.
+    if callsign:
+        conditions.append("hd.call_sign ILIKE %(callsign)s")
+        params["callsign"] = f"%{callsign.strip()}%"
+    if name:
+        conditions.append(
+            "(en.entity_name ILIKE %(name)s OR en.first_name ILIKE %(name)s OR en.last_name ILIKE %(name)s)"
+        )
+        params["name"] = f"%{name.strip()}%"
+    if city:
+        conditions.append("en.city ILIKE %(city)s")
+        params["city"] = f"%{city.strip()}%"
     if state:
-        conditions.append("en.state = %(state)s")
-        params["state"] = state.upper()
+        conditions.append("en.state ILIKE %(state)s")
+        params["state"] = f"%{state.strip()}%"
     if status_code:
         conditions.append("hd.license_status = %(status_code)s")
         params["status_code"] = status_code.upper()
@@ -64,22 +81,43 @@ async def browse_amateur(
 async def amateur_detail(call_sign: str, conn: AsyncConnection = Depends(get_db)):
     call_sign = call_sign.upper()
     async with conn.cursor() as cur:
-        await cur.execute("SELECT * FROM amat_hd WHERE call_sign = %s", (call_sign,))
-        hd = await cur.fetchone()
-        if hd is None:
+        # A callsign can have MULTIPLE unique_system_identifier rows across
+        # time (reassigned as a vanity after a prior holder's license
+        # expired). Resolve the CURRENT holder: prefer the active ('A')
+        # record, otherwise the most recently granted. All other sections
+        # scope to that same USID so we never blend two holders' data.
+        await cur.execute(
+            """
+            SELECT unique_system_identifier FROM amat_hd
+            WHERE call_sign = %s
+            ORDER BY (license_status = 'A') DESC, grant_date DESC NULLS LAST
+            LIMIT 1
+            """,
+            (call_sign,),
+        )
+        row = await cur.fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail="Callsign not found")
+        usid = row["unique_system_identifier"]
 
-        await cur.execute("SELECT * FROM amat_en WHERE call_sign = %s", (call_sign,))
+        await cur.execute("SELECT * FROM amat_hd WHERE unique_system_identifier = %s", (usid,))
+        hd = await cur.fetchone()
+
+        await cur.execute("SELECT * FROM amat_en WHERE unique_system_identifier = %s", (usid,))
         entity = await cur.fetchone()
 
-        await cur.execute("SELECT * FROM amat_am WHERE callsign = %s", (call_sign,))
+        await cur.execute("SELECT * FROM amat_am WHERE unique_system_identifier = %s", (usid,))
         amateur_specific = await cur.fetchone()
 
+        # Full callsign history across ALL holders (every USID), so the
+        # timeline shows e.g. a prior holder's expiry then the vanity grant.
         await cur.execute(
             "SELECT * FROM amat_hs WHERE callsign = %s ORDER BY log_date DESC NULLS LAST",
             (call_sign,),
         )
         history = await cur.fetchall()
+        for h in history:
+            h["code_description"] = describe_history_code(h.get("code"))
 
         await cur.execute(
             """

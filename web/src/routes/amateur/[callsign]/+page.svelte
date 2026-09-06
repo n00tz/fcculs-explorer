@@ -103,10 +103,14 @@
 		<h2>License History</h2>
 		<div class="card">
 			<table>
-				<thead><tr><th>Date</th><th>Code</th></tr></thead>
+				<thead><tr><th>Date</th><th>Code</th><th>Meaning</th></tr></thead>
 				<tbody>
 					{#each detail.history as h}
-						<tr><td>{h.log_date}</td><td>{h.code}</td></tr>
+						<tr>
+							<td>{h.log_date}</td>
+							<td><code>{h.code}</code></td>
+							<td>{h.code_description ?? ''}</td>
+						</tr>
 					{/each}
 				</tbody>
 			</table>

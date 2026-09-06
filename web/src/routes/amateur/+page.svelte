@@ -2,6 +2,9 @@
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
 
+	let callsign = '';
+	let name = '';
+	let city = '';
 	let state = '';
 	let statusCode = '';
 	let operatorClass = '';
@@ -18,6 +21,9 @@
 		error = '';
 		try {
 			const data = await get('/amateur', {
+				callsign: callsign || undefined,
+				name: name || undefined,
+				city: city || undefined,
 				state: state || undefined,
 				status: statusCode || undefined,
 				class: operatorClass || undefined,
@@ -61,14 +67,18 @@
 <h1>Amateur Radio Licenses</h1>
 
 <div class="filters">
-	<input placeholder="State (e.g. KS)" maxlength="2" bind:value={state} />
+	<input placeholder="Callsign (partial)" bind:value={callsign} />
+	<input placeholder="Licensee name (partial)" bind:value={name} />
+	<input placeholder="City (partial)" bind:value={city} />
+	<input placeholder="State" maxlength="2" bind:value={state} />
 	<select bind:value={statusCode}>
 		<option value="">Any status</option>
 		<option value="A">Active</option>
 		<option value="E">Expired</option>
 		<option value="C">Cancelled</option>
+		<option value="T">Terminated</option>
 	</select>
-	<input placeholder="Operator class (e.g. E)" maxlength="2" bind:value={operatorClass} />
+	<input placeholder="Operator class (e.g. G)" maxlength="2" bind:value={operatorClass} />
 	<button on:click={applyFilters}>Apply filters</button>
 </div>
 
