@@ -25,10 +25,12 @@ echo "=== Applying migrations ==="
 podman cp /tmp/ingestor_full/002_fcc_raw_tables.sql fcculs-itest-pg:/tmp/
 podman cp /tmp/ingestor_full/001_app_tables.sql fcculs-itest-pg:/tmp/
 podman cp /tmp/ingestor_full/003_identity_grouping_views.sql fcculs-itest-pg:/tmp/
+podman cp /tmp/005_frn_watch_support.sql fcculs-itest-pg:/tmp/
 podman exec fcculs-itest-pg psql -U postgres -d fcculs_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
 podman exec fcculs-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/002_fcc_raw_tables.sql
 podman exec fcculs-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/001_app_tables.sql
 podman exec fcculs-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/003_identity_grouping_views.sql
+podman exec fcculs-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/005_frn_watch_support.sql
 
 echo "=== Running ingestor integration test in python:3.12-slim ==="
 podman run --rm --pod fcculs-itest \
