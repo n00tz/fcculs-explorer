@@ -197,10 +197,29 @@ volumes for Postgres data and Redis persistence (if enabled). A
     plus crosslinked browse-page filters read from URL query params.
 17. `future-roadmap-doc` — Document explicitly deferred future features
     (other FCC ULS service databases, an MCP server) so they aren't lost.
+18. `security-cors-lockdown` — Replace wildcard CORS with an explicit
+    `.env`-driven origin allow-list (`FCCULS_CORS_ALLOW_ORIGINS`).
+19. `security-webhook-ssrf` — Block SSRF via webhook notification channels
+    (loopback/private/link-local/metadata-IP rejection, no redirects,
+    per-user channel/watch caps).
+20. `security-rate-limiting` — Redis-backed rate limiting on
+    `POST /api/auth/request-link` and `POST /api/admin/login`.
+21. `security-secret-startup-guard` — Fail API startup if
+    `SESSION_SECRET` is left at its default/empty value.
+22. `security-admin-cookie-scheme` — Add proxy-headers awareness so the
+    admin session cookie's `Secure` flag is correct behind Caddy +
+    Cloudflare Tunnel.
+23. `security-response-headers` — Add HSTS/`X-Content-Type-Options`/
+    `Referrer-Policy`/CSP headers to the Caddyfile.
+24. `security-web-dockerfile-nonroot` — Add an explicit non-root `USER`
+    to `web/Dockerfile`.
+25. `security-docs-plan-update` — Document this assessment + fixes + a
+    progress log entry here.
 
 Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
 6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8; 11 depends on 9;
-12,13,15,16 depend on 6; 14 depends on 13.
+12,13,15,16 depend on 6; 14 depends on 13; 18-24 depend on 9 (existing
+compose/Quadlet config); 25 depends on 18-24.
 
 ## 10. Progress Log
 
@@ -689,6 +708,108 @@ commands for a given test run are chained into a single SSH invocation.
   results, the same query param the new detail-page state links now
   produce). Cleaned up all disposable test containers/pods and the test
   user rows created during admin-panel verification.
+
+- ✅ `security-cors-lockdown`, `security-webhook-ssrf`,
+  `security-rate-limiting`, `security-secret-startup-guard`,
+  `security-admin-cookie-scheme`, `security-response-headers`,
+  `security-web-dockerfile-nonroot`, `security-docs-plan-update` — done.
+  Ahead of exposing the app to the internet via a manually-configured
+  Cloudflare Tunnel, the user asked for an assessment focused on three
+  questions: can the email feature be abused, can the hidden `/admin`
+  panel be backdoored, and is there any RCE ("pop a shell") surface.
+
+  **Assessment findings**: no SQL/command injection, unsafe
+  deserialization, or path traversal anywhere — no RCE-class bug exists.
+  The real risk was account/session takeover and internal-network abuse:
+  (1) CORS was `allow_origins=["*"]` with `allow_credentials=True`
+  (`api/app/config.py`, `api/app/main.py`), which Starlette turns into
+  reflecting any `Origin` header back with credentials allowed — any
+  malicious site could steal a signed-in session (including an admin's)
+  via a cross-origin `fetch(..., {credentials:"include"})`; (2) webhook
+  notification channels accepted any URL with no scheme/host validation
+  (`api/app/routers/channels.py`, `notifier/app/senders/webhook.py`),
+  an unrestricted SSRF vector from the notifier's position on the
+  internal network (reachable to `postgres`/`redis`/`api`), with no
+  per-user cap making it trivially repeatable; (3) `POST
+  /api/auth/request-link` and `POST /api/admin/login` had no rate
+  limiting, letting an anonymous visitor spam real "sign in" emails at
+  any address (email-harassment-via-relay) or hammer the admin login
+  with no backoff; (4) nothing guarded against `SESSION_SECRET` being
+  left at its literal default (`"change-me-in-production"`), which signs
+  both the user and admin session cookies — the single most damaging
+  possible misconfiguration, previously silent. Medium items: the admin
+  cookie's `Secure` flag was computed from the raw (non-proxy-aware)
+  request scheme, so it would likely be set without `Secure` behind
+  Caddy + Cloudflare Tunnel; no security response headers were sent by
+  Caddy; `web/Dockerfile` had no explicit non-root `USER` (low real risk
+  under rootless Podman's user namespace, but cheap to fix). Per the
+  user's explicit choice after being shown the tradeoff, FastAPI's
+  `/docs`/`/redoc`/`/openapi.json` were left public (accepted risk, not
+  a defect) — this fully discloses endpoint shapes including
+  `/api/admin/*`, but the log-only rotating admin password still gates
+  actual admin use.
+
+  **Fixes**: CORS now reads an explicit allow-list from a new
+  `FCCULS_CORS_ALLOW_ORIGINS` env var (comma-separated, default
+  `https://fcculs-explorer.n00tz.net`), wired through `compose.yaml`,
+  `quadlet/fcculs-api.container`, and `deploy/install-quadlets.sh` like
+  other `.env`-driven settings, documented in `.env.example` and
+  README. Webhook URLs are now validated at both creation time
+  (`POST /api/channels`) and send time via a new `url_safety.py` module
+  (independent copies in `api/app/` and `notifier/app/`, kept manually
+  in sync) that restricts scheme to `http`/`https`, resolves the
+  hostname and rejects loopback/private/link-local/multicast/reserved/
+  unspecified IPs (covers the `169.254.169.254` metadata address), with
+  `httpx`'s `follow_redirects` left at its default `False`; added
+  per-user caps (20 channels, 50 watches). Added a Redis-backed
+  fixed-window rate limiter (`api/app/ratelimit.py`, `INCR`+`EXPIRE`,
+  chosen over in-memory limiting so limits survive restarts/multiple
+  workers) applied to `request-link` (5/email+IP/hour) and
+  `admin/login` (5/IP/15min). Added a startup guard in `main.py`'s
+  `lifespan` that raises if `SESSION_SECRET` is empty or still the
+  default, failing fast before serving traffic. Added uvicorn's
+  proxy-headers support (`--proxy-headers --forwarded-allow-ips=*` in
+  `api/Dockerfile`'s `CMD`) so `request.url.scheme` — and therefore the
+  admin cookie's `Secure` flag — is correct app-wide behind the proxy
+  chain. Added HSTS, `X-Content-Type-Options`, `Referrer-Policy`,
+  `X-Frame-Options: DENY`, and `frame-ancestors 'none'` to
+  `web/Caddyfile`. Added a non-root `USER caddy-app` to `web/Dockerfile`.
+
+  Testing: added `api/tests/test_url_safety.py` and
+  `notifier/tests/test_url_safety.py` (unit coverage of the SSRF guard,
+  including a test-only bypass env var
+  `FCCULS_ALLOW_PRIVATE_WEBHOOK_TARGETS_FOR_TESTING` used solely so the
+  notifier's own integration test can deliver to its loopback mock
+  server — never wired into `.env.example`, `compose.yaml`, or any
+  Quadlet template), extended `notifier/tests/test_senders.py` with SSRF
+  guard coverage, and extended both `api/tests/integration_test.py` and
+  `notifier/tests/integration_test.py` with SSRF-rejection and
+  per-user-cap checks. Ran the full suites in disposable containers on
+  `fcculs@10.64.3.39` against real Postgres + Redis: **25 api unit tests
+  + the full api integration script**, and **22 notifier unit tests +
+  the full notifier integration script**, all passing. Found and fixed
+  along the way: a too-narrow `except socket.gaierror` that didn't match
+  mocked `OSError` in unit tests (widened to `except OSError`), and a
+  stale integration-test assumption about admin-logout's status code.
+
+  Deployed via `deploy/update.sh` on `fcculs@10.64.3.39`, plus a manual
+  rerun of `deploy/install-quadlets.sh` (discovered `update.sh` alone
+  does not re-render installed Quadlet unit files from the templates in
+  `quadlet/`, so the new `Wants=fcculs-redis.service`,
+  `FCCULS_REDIS_URL`, and `FCCULS_CORS_ALLOW_ORIGINS` lines added to
+  `fcculs-api.container` required a full reinstall + `systemctl --user
+  daemon-reload` to take effect) followed by restarting `fcculs-api`/
+  `fcculs-web`. Live-verified against the real internet-facing stack:
+  `GET /` and `GET /api/search` return 200 with all 5 new security
+  headers present; a CORS preflight (`OPTIONS` with
+  `Origin: https://evil.example`) gets **no**
+  `Access-Control-Allow-Origin` header back, while the same preflight
+  from the real allowed origin gets it correctly reflected; repeated
+  `POST /api/admin/login` attempts return `401` for wrong-password
+  attempts and then `429` once the configured 5-per-window limit is
+  reached, confirming the limiter is live and enforcing in production,
+  not just in the test suite. Cleaned up all disposable test
+  containers/pods and scratch files created during verification.
 
 ## 12. Future Features (Deferred)
 
