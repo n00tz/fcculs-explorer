@@ -14,6 +14,10 @@ os.environ.setdefault(
 )
 os.environ.setdefault("FCCULS_MAGIC_LINK_BASE_URL", "http://testserver")
 os.environ.setdefault("FCCULS_SESSION_SECRET", "test-secret")
+# No notifier worker runs in this isolated test pod, so keep the test-send
+# poll short -- the endpoint will legitimately time out waiting for a
+# result, which is exactly what we assert on below.
+os.environ.setdefault("FCCULS_TEST_SEND_POLL_TIMEOUT_SECONDS", "1")
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -185,6 +189,44 @@ def main():
         watch = resp.json()
         assert watch["subject_value"] == "K0WNL"
         print("watch create OK:", watch["id"])
+
+        # --- watch-by-FRN: a brand-new ham watching their FRN before they
+        # have a callsign/ULS ID yet must be an allowed subject type ---
+        resp = client.post(
+            "/api/watches",
+            json={"subject_type": "frn", "subject_value": "0009999999", "channel_id": channel_id},
+        )
+        assert resp.status_code == 201, resp.text
+        frn_watch = resp.json()
+        assert frn_watch["subject_type"] == "frn"
+        assert frn_watch["subject_value"] == "0009999999"
+        print("watch-by-frn create OK:", frn_watch["id"])
+        resp = client.delete(f"/api/watches/{frn_watch['id']}")
+        assert resp.status_code == 204
+
+        # --- browse column sorting: amateur + tower browse both accept
+        # sort/order and reject unknown columns ---
+        resp = client.get("/api/amateur", params={"state": "KS", "sort": "entity_name", "order": "desc"})
+        assert resp.status_code == 200, resp.text
+        resp = client.get("/api/amateur", params={"sort": "not_a_real_column"})
+        assert resp.status_code == 400, resp.text
+        resp = client.get("/api/towers", params={"state": "TN", "sort": "overall_height_above_ground", "order": "asc"})
+        assert resp.status_code == 200, resp.text
+        resp = client.get("/api/towers", params={"sort": "not_a_real_column"})
+        assert resp.status_code == 400, resp.text
+        print("browse column sorting OK")
+
+        # --- channel test-send: ownership-checked, and (with no notifier
+        # worker running in this isolated pod) legitimately times out
+        # waiting for a result rather than erroring ---
+        resp = client.post(f"/api/channels/{channel_id}/test")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "timeout", resp.json()
+        print("channel test-send enqueue OK (no worker in pod -> timeout as expected)")
+
+        resp = client.post("/api/channels/999999/test")
+        assert resp.status_code == 404, resp.text
+        print("channel test-send ownership check OK")
 
         # Duplicate watch should conflict.
         resp = client.post(

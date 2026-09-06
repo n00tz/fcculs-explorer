@@ -7,7 +7,7 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0, "/app")
 
-from app.render import render_message
+from app.render import render_message, render_test_message, PLATFORM_MESSAGE_LIMITS
 from app.senders.email_to_sms import send_email_to_sms
 from app.senders.presets import send_discord, send_matrix, send_ntfy, send_telegram
 from app.senders.webhook import _substitute, send_webhook
@@ -43,6 +43,39 @@ class TestRenderMessage(unittest.TestCase):
         }
         _, body = render_message(watch, change_event)
         self.assertIn("Old value: (blank)", body)
+
+
+class TestRenderTestMessage(unittest.TestCase):
+    """render_test_message() powers the 'Send test' feature: a verbose,
+    self-explanatory message not tied to any real watch/change_event,
+    truncated to each platform's practical message-length limit so the
+    test message itself demonstrates the real constraint."""
+
+    def test_returns_subject_and_body_for_every_known_channel_type(self):
+        for channel_type in PLATFORM_MESSAGE_LIMITS:
+            subject, body = render_test_message(channel_type)
+            self.assertTrue(subject)
+            self.assertTrue(body)
+            self.assertIn("TEST", body)
+
+    def test_body_respects_platform_length_limit(self):
+        for channel_type, limit in PLATFORM_MESSAGE_LIMITS.items():
+            _, body = render_test_message(channel_type)
+            # A little slack is allowed for a short trailing truncation
+            # marker, but the body must never balloon past the platform's
+            # practical ceiling.
+            self.assertLessEqual(len(body), limit + 50, f"{channel_type} body too long: {len(body)} chars")
+
+    def test_email_to_sms_body_is_short(self):
+        # email_to_sms's own sender hard-truncates to 140 chars regardless,
+        # but the rendered test body should already respect that limit.
+        _, body = render_test_message("email_to_sms")
+        self.assertLessEqual(len(body), 190)
+
+    def test_unknown_channel_type_falls_back_to_default_limit(self):
+        subject, body = render_test_message("some_future_channel_type")
+        self.assertTrue(subject)
+        self.assertLessEqual(len(body), 4050)
 
 
 class TestWebhookSubstitution(unittest.TestCase):
