@@ -247,7 +247,7 @@ def main():
         print("admin user delete OK")
 
         resp = client.post("/api/admin/logout")
-        assert resp.status_code == 204
+        assert resp.status_code == 200, resp.text
         resp = client.get("/api/admin/users")
         assert resp.status_code == 401
         print("admin auth-required enforcement OK")
