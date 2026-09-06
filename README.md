@@ -163,4 +163,8 @@ same public records FCC itself publishes. Attribution: data sourced from
 the Federal Communications Commission, Universal Licensing System (ULS),
 https://www.fcc.gov/uls.
 
-Application source code license: TBD by the repository owner.
+The application source code is licensed under the GNU General Public
+License, version 3 — see the `LICENSE` file in this repository. You are
+free to use, modify, and redistribute this software, including
+commercially, provided that any distributed copies or modified versions
+remain under GPLv3 and include their source code.
