@@ -18,17 +18,32 @@
 		reverse_proxy api:8000
 	}
 
-	# MCP server. Both /mcp and /mcp/* must be matched: the SDK mounts the
-	# transport at /mcp and issues its own /mcp -> /mcp/ redirect, so a
-	# /mcp/* -only rule would 404 the very first request a client makes.
+	# MCP server. `handle /mcp*` (not `/mcp/*`) is required: the SDK mounts
+	# the transport at /mcp and redirects /mcp/ -> /mcp, so a `/mcp/*`-only
+	# rule would miss the un-slashed path that clients actually use.
+	#
+	# Cloudflare terminates TLS and cloudflared reaches this container over
+	# plain HTTP, so Caddy's own {scheme} is "http" and Caddy does not trust
+	# an incoming X-Forwarded-Proto unless the sender is a configured
+	# trusted_proxy. Left alone, the upstream sees "http" and emits that
+	# /mcp/ -> /mcp redirect as http://, a protocol downgrade MCP clients
+	# refuse to follow. Matching on the header Cloudflare actually sends
+	# re-asserts the real scheme without hardcoding cloudflared's IP, and
+	# still lets a genuine plain-HTTP request on the LAN stay http.
+	@mcp_https {
+		path /mcp*
+		header X-Forwarded-Proto https
+	}
+	handle @mcp_https {
+		reverse_proxy mcp:8080 {
+			header_up X-Forwarded-Proto https
+			transport http {
+				response_header_timeout 120s
+			}
+		}
+	}
 	handle /mcp* {
 		reverse_proxy mcp:8080 {
-			# MCP clients refuse to follow a redirect that downgrades to
-			# http://, so the upstream must see the real scheme to build
-			# its redirect correctly.
-			header_up X-Forwarded-Proto {scheme}
-			# Tool calls proxy through to the API and can outlast Caddy's
-			# default 100s stream timeout on a slow query.
 			transport http {
 				response_header_timeout 120s
 			}
