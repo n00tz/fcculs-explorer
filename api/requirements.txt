@@ -5,7 +5,7 @@ psycopg-pool==3.3.*
 pydantic-settings==2.*
 email-validator==2.*
 itsdangerous==2.*
-aiosmtplib==3.*
+aiosmtplib==5.*
 httpx==0.28.*
 redis==8.*
 rq==1.*
