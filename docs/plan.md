@@ -1777,6 +1777,90 @@ commands for a given test run are chained into a single SSH invocation.
   places a reader is most likely to want a picture — the daily-file
   explanation (§3 + §12), `update.sh` (§11), and gap diagnosis.
 
+### Progress Log — Dependabot api dependency batch (#22–#26)
+
+Worked through five open Dependabot PRs, all single-line bumps to
+`api/requirements.txt`. Because every PR touched adjacent lines of the
+same file, they could not be merged independently without conflicts, so
+all five were applied together on a `deps/dependabot-batch` branch off
+current master and validated as one unit.
+
+**Scope of the bumps**
+
+| Package | From | To | PR |
+|---|---|---|---|
+| `fastapi` | `0.115.*` | `0.141.*` | #23 |
+| `uvicorn[standard]` | `0.30.*` | `0.52.*` | #25 |
+| `psycopg[binary]` | `3.2.*` | `3.3.*` | #22 |
+| `aiosmtplib` | `3.*` | `5.*` | #26 |
+| `rq` | `1.*` | `2.*` | #24 |
+
+`starlette` also jumps to `1.6.0` transitively via fastapi — a major
+version change not itself listed in any of the PRs, and worth noting
+because it, not fastapi, owns the middleware/CORS/session behavior this
+app depends on.
+
+**Pre-existing skew discovered (the most useful finding)**
+
+`notifier/requirements.txt` was *already* on `rq==2.12.*` and
+`psycopg==3.3.*` while `api` sat on `rq==1.*` and `psycopg==3.2.*` —
+despite the two services sharing a Redis queue and enqueuing jobs across
+the container boundary **by string path** (`app.jobs.send_test_message`),
+which is exactly the pattern most sensitive to an RQ job-payload format
+change. This was never deliberate. PRs #22 and #24 close it.
+
+Rather than assume, both directions were proven empirically against a
+real notifier worker running rq 2.12: api on rq **1.16.2** → worker
+`INTEROP OK`, and api on rq **2.12.0** → worker `INTEROP OK`. So the
+skew was *latent* rather than actively broken — but it was a real
+cross-version dependency nobody had verified, and aligning the pins
+removes it.
+
+**Verification** (disposable containers on the deploy host, per this
+project's methodology)
+
+- **A/B harness**: a throwaway Postgres+Redis pod with all `db/0*.sql`
+  migrations applied, running the api unit + integration suites against
+  a supplied requirements file. Written because
+  `api/tests/run_integration.sh` has hardcoded `/tmp/...` paths and
+  predates `db/007`. Baseline (master pins) and bumped both give **31
+  unit tests passed + `ALL API INTEGRATION CHECKS PASSED`** — identical
+  results, with baseline's 4 deprecation warnings gone after the bump.
+- **uvicorn 0.30 → 0.52**: booted under the *real* Dockerfile CMD
+  (`--proxy-headers --forwarded-allow-ips=*`) rather than a bare
+  `uvicorn app.main:app`, since the proxy flags are the part most likely
+  to break behind Caddy + Cloudflare Tunnel. `/api/healthz` and
+  `/openapi.json` both 200; `X-Forwarded-Proto`/`Host` still honored.
+- **aiosmtplib 3 → 5** — the largest risk, being a double-major bump
+  whose only existing coverage (`tests/test_mailer.py`) is fully mocked
+  and therefore validates the *call*, not the real signature or wire
+  behavior. Exercised for real against a disposable non-AUTH SMTP sink
+  that records what it receives:
+  - the magic-link message arrives **intact** — From/To/Subject headers,
+    body copy, and the token in the callback URL all verified on the
+    receiving end, not merely "no exception raised";
+  - `aiosmtplib.send()` still accepts every kwarg `mailer.py` passes
+    (`hostname`, `port`, `start_tls`, `username`, `password`);
+  - passing a non-None `username` to a relay that doesn't advertise AUTH
+    **still raises** under v5, confirming the semantic that
+    `api/app/mailer.py`'s empty-string-user guard exists to work around
+    is unchanged — so that guard remains both correct and necessary.
+    Had v5 quietly changed this, the guard would have become dead code
+    and the original empty-`FCCULS_SMTP_USER` bug could have silently
+    returned in a different form.
+
+**Note for future dependency rounds**: a green mocked unit test is not
+evidence that a major bump of an I/O library is safe. In this round the
+mocked mailer tests passed identically on aiosmtplib 3 and 5 while
+telling us nothing about either the signature or the AUTH semantics the
+production code actually depends on. The real-listener smoke test is
+what produced the confidence to merge #26.
+
+Merged to master and deployed via `deploy/update.sh --force` with a
+live smoke test, per README's Development / Testing Methodology rule
+that dependency and base-image bumps get the same live verification as
+any other change and are never auto-merged.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
