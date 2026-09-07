@@ -13,6 +13,7 @@
 	import { page as pageStore } from '$app/stores';
 	import { fieldHelp, describeCode } from '$lib/fieldDefs.js';
 	import CodeValue from '$lib/CodeValue.svelte';
+	import Pagination from '$lib/Pagination.svelte';
 
 	export let service;
 
@@ -24,7 +25,7 @@
 
 	let items = [];
 	let total = 0;
-	let loading = false;
+	let loading = true;
 	let error = '';
 
 	// Pre-fill filters from the URL so crosslinks from detail pages (e.g.
@@ -199,8 +200,4 @@
 {#if loading}<p class="muted">Loading…</p>{/if}
 {#if !loading && items.length === 0}<p class="muted">No matching licences found.</p>{/if}
 
-<div class="pagination">
-	<button class="secondary" disabled={page <= 1} on:click={prevPage}>← Previous</button>
-	<span class="muted">Page {page} · {total} total</span>
-	<button class="secondary" disabled={page * pageSize >= total} on:click={nextPage}>Next →</button>
-</div>
+<Pagination {page} {pageSize} {total} {loading} onPrev={prevPage} onNext={nextPage} />

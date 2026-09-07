@@ -3,6 +3,8 @@
 	import { describeCode, fieldHelp } from '$lib/fieldDefs.js';
 	import { onMount } from 'svelte';
 	import HeroGraphic from '$lib/HeroGraphic.svelte';
+	import Pagination from '$lib/Pagination.svelte';
+	import { formatCount } from '$lib/format.js';
 	import { serviceRoute, PERSONAL_SERVICE_LIST } from '$lib/personalServices.js';
 
 	let query = '';
@@ -74,7 +76,7 @@
 	let newHamsTotal = 0;
 	let newHamsTotalIndividuals = 0;
 	let newHamsTotalClubs = 0;
-	let newHamsLoading = false;
+	let newHamsLoading = true;
 	let newHamsError = '';
 
 	async function loadNewHams() {
@@ -174,8 +176,8 @@
 		<p class="muted">No new grants in the last 10 days — check back after the next daily FCC update.</p>
 	{:else}
 		<p class="new-hams-summary">
-			<strong>{newHamsTotalIndividuals}</strong> new amateur radio operators licensed ·
-			<strong>{newHamsTotalClubs}</strong> new club stations
+			<strong>{formatCount(newHamsTotalIndividuals)}</strong> new amateur radio operators licensed ·
+			<strong>{formatCount(newHamsTotalClubs)}</strong> new club stations
 			<span class="muted">in the last 10 days</span>
 		</p>
 		<table class="new-hams-table">
@@ -211,11 +213,15 @@
 				{/each}
 			</tbody>
 		</table>
-		<div class="pagination">
-			<button class="secondary" disabled={newHamsPage <= 1} on:click={newHamsPrevPage}>← Previous</button>
-			<span class="muted">Page {newHamsPage} · {newHamsTotal} total</span>
-			<button class="secondary" disabled={newHamsPage * newHamsPageSize >= newHamsTotal} on:click={newHamsNextPage}>Next →</button>
-		</div>
+		<Pagination
+			page={newHamsPage}
+			pageSize={newHamsPageSize}
+			total={newHamsTotal}
+			loading={newHamsLoading}
+			compact={true}
+			onPrev={newHamsPrevPage}
+			onNext={newHamsNextPage}
+		/>
 	{/if}
 	<p class="muted new-hams-footnote"><a href="/new-hams">See the full listing →</a></p>
 </div>

@@ -1,5 +1,6 @@
 <script>
 	import { get, post, patch, del } from '$lib/api.js';
+	import Pagination from '$lib/Pagination.svelte';
 	import { onMount } from 'svelte';
 
 	// This route is intentionally not linked from the nav. Auth is a single
@@ -237,11 +238,7 @@
 				</tbody>
 			</table>
 		</div>
-		<div class="pagination">
-			<button class="secondary" disabled={usersPage <= 1} on:click={usersPrevPage}>← Previous</button>
-			<span class="muted">Page {usersPage} · {usersTotal} total</span>
-			<button class="secondary" disabled={usersPage * pageSize >= usersTotal} on:click={usersNextPage}>Next →</button>
-		</div>
+		<Pagination page={usersPage} {pageSize} total={usersTotal} onPrev={usersPrevPage} onNext={usersNextPage} />
 	{:else}
 		<h2>Watches</h2>
 		<div class="card">
@@ -283,10 +280,6 @@
 				</tbody>
 			</table>
 		</div>
-		<div class="pagination">
-			<button class="secondary" disabled={watchesPage <= 1} on:click={watchesPrevPage}>← Previous</button>
-			<span class="muted">Page {watchesPage} · {watchesTotal} total</span>
-			<button class="secondary" disabled={watchesPage * pageSize >= watchesTotal} on:click={watchesNextPage}>Next →</button>
-		</div>
+		<Pagination page={watchesPage} {pageSize} total={watchesTotal} onPrev={watchesPrevPage} onNext={watchesNextPage} />
 	{/if}
 {/if}

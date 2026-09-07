@@ -129,7 +129,9 @@ missed a day of FCC data (an operator can fix that — see `README.md`).
 
 The home page only shows 12 at a time (so the page stays a comfortable
 size on a computer screen), with **Previous**/**Next** buttons if you
-want to page through more. If you want the *complete* list — not just
+want to page through more, and a small counter between them showing
+which page you're on and which entries you're looking at (for example
+`Page 1 of 4 · 1–12 of 43`). If you want the *complete* list — not just
 the newest handful — scroll all the way down to the **footer** at the
 bottom of any page and click **New Hams**, which opens a full,
 searchable, filterable listing (you can filter by "All", "Individual
@@ -193,6 +195,18 @@ you don't need to type the whole value:
 Combine as many filters as you like, then click **Apply filters**.
 Results are paginated 25 at a time; use **Previous**/**Next** to page
 through.
+
+Under those buttons is a counter that tells you exactly where you are,
+like this:
+
+> Page 1 of 57,645 · showing 1–25 of 1,441,106
+
+Read it as: *"this is the 1st page out of 57,645 pages; the 25 rows on
+screen right now are records number 1 through 25, out of 1,441,106 that
+matched."* The bigger number is how many **records** matched your
+filters — not how many pages there are. Add more filters to make both
+numbers smaller. If nothing matches at all, the counter simply says **No
+results**.
 
 Click any callsign in the results to open its full detail page. Not sure
 what one of the abbreviations (like a Status code or Operator Class)

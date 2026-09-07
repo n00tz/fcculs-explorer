@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { page as pageStore } from '$app/stores';
 	import { fieldHelp, describeCode } from '$lib/fieldDefs.js';
+	import Pagination from '$lib/Pagination.svelte';
 
 	let callsign = '';
 	let name = '';
@@ -17,7 +18,7 @@
 
 	let items = [];
 	let total = 0;
-	let loading = false;
+	let loading = true;
 	let error = '';
 
 	// Support crosslinks from detail pages (e.g. clicking a state/class on a
@@ -171,9 +172,5 @@
 
 {#if loading}<p class="muted">Loading…</p>{/if}
 
-<div class="pagination">
-	<button class="secondary" disabled={page <= 1} on:click={prevPage}>← Previous</button>
-	<span class="muted">Page {page} · {total} total</span>
-	<button class="secondary" disabled={page * pageSize >= total} on:click={nextPage}>Next →</button>
-</div>
+<Pagination {page} {pageSize} {total} {loading} onPrev={prevPage} onNext={nextPage} />
 

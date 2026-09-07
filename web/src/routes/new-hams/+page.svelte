@@ -1,6 +1,8 @@
 <script>
 	import { get } from '$lib/api.js';
 	import { describeCode, fieldHelp } from '$lib/fieldDefs.js';
+	import Pagination from '$lib/Pagination.svelte';
+	import { formatCount } from '$lib/format.js';
 	import { onMount } from 'svelte';
 
 	let type = '';
@@ -11,7 +13,7 @@
 	let total = 0;
 	let totalIndividuals = 0;
 	let totalClubs = 0;
-	let loading = false;
+	let loading = true;
 	let error = '';
 
 	async function load() {
@@ -77,8 +79,8 @@
 {#if error}<p class="error">{error}</p>{/if}
 
 <p class="muted">
-	<strong>{totalIndividuals}</strong> new amateur radio operators licensed ·
-	<strong>{totalClubs}</strong> new club stations
+	<strong>{formatCount(totalIndividuals)}</strong> new amateur radio operators licensed ·
+	<strong>{formatCount(totalClubs)}</strong> new club stations
 	<span class="muted">(last 10 days)</span>
 </p>
 
@@ -115,8 +117,4 @@
 
 {#if loading}<p class="muted">Loading…</p>{/if}
 
-<div class="pagination">
-	<button class="secondary" disabled={page <= 1} on:click={prevPage}>← Previous</button>
-	<span class="muted">Page {page} · {total} total</span>
-	<button class="secondary" disabled={page * pageSize >= total} on:click={nextPage}>Next →</button>
-</div>
+<Pagination {page} {pageSize} {total} {loading} onPrev={prevPage} onNext={nextPage} />
