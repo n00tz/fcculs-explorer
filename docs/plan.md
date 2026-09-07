@@ -2096,6 +2096,61 @@ image ID is the quick way to detect that drift; the script finished on
 its own and the IDs matched afterwards. Re-running `update.sh` in that
 window would have reported "Already up to date" and skipped the restart,
 since all four images legitimately carried the current revision label.
+
+### Progress Log — MCP server plan refreshed (still not built)
+
+Planning-only, at the user's explicit request: bring §12a into line with
+the app as it exists today. No code was written and no todos were
+created — the section describes work that is still deferred.
+
+The old draft had gone stale in two independent ways. **Feature-wise**
+it only knew about Amateur and Tower, so it silently omitted the
+GMRS/Aircraft/Ship browse+detail endpoints, `/api/new-hams`, eight of
+the twelve search arms, and the fact that `identity_by_frn` now spans
+five services. **Stack-wise** it named `FastMCP`, which no longer
+exists.
+
+That second point is why this was verified rather than summarised.
+Checked against PyPI and the SDK source at tag `v2.2.0`: `mcp` 2.2.0 is
+current, and `src/mcp/server/fastmcp.py` is now a deliberate tombstone
+that raises `ModuleNotFoundError` pointing at a migration guide — the
+class is `MCPServer`. The current spec revision is `2026-07-28`, which
+is sessionless by construction (no `initialize`, no `Mcp-Session-Id`,
+so no sticky-session requirement). The SDK also depends on **`httpx2`**,
+a different distribution from the `httpx` the notifier pins.
+
+One claim was worth chasing down to the source because a plain reading
+of it was **wrong in both directions**. `TransportSecurityMiddleware`'s
+own default is DNS-rebinding protection *disabled* — but the app factory
+in `lowlevel/server.py` pre-empts that: when `transport_security is
+None` **and** `host` is a loopback value, it auto-arms protection with a
+localhost-only allowlist. So behind Caddy the endpoint would return
+`421 Misdirected Request` for every request, logged server-side only
+while the client sees a generic transport error. Two further traps
+recorded: the `host=` argument is not the uvicorn bind address (passing
+a real hostname there disarms the check rather than allowlisting it),
+and constructing `TransportSecuritySettings()` without `allowed_hosts`
+enables the check against an empty list, rejecting everything.
+
+Two genuinely new findings came out of auditing the current code rather
+than the old plan. First, **`identity.py` has no rate limiting at all** —
+it imports no limiter — and those are the most expensive queries in the
+app as well as the most attractive to an agent; the old plan only ever
+flagged the Amateur/Tower *detail* gap. Note the asymmetry: the
+personal-services detail endpoints, built later via the router factory,
+*are* limited, so this is an oversight rather than a decision. Second,
+`web/src/lib/fieldDefs.js` is 409 lines of code decodings that exist
+**only in the frontend**, so an MCP client would receive raw FCC codes
+where a human gets a tooltip — reintroducing exactly the second-class
+experience the GMRS/Aircraft/Ship round was meant to prevent. Both now
+have todos in the section.
+
+Also recorded: a top-level `mcp/` directory would collide with the `mcp`
+package name and could shadow the SDK import, so the directory name must
+be decided before scaffolding rather than debugged afterwards.
+
+Docs-only; `plan.md` is not baked into any image, so no redeploy.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
@@ -2117,176 +2172,374 @@ so they aren't lost or accidentally reinvented differently later:
 
 ## 12a. MCP Server — Planned Design (Not Yet Built)
 
-Planned on request; deliberately not started yet (revisit when the
-user is ready to build). This section exists so a future session can
-resume directly into implementation with zero lost context — treat it
-as a design doc, not a progress log entry (nothing here is "done").
+Planned on request; deliberately not started yet (revisit when the user
+is ready to build). This section exists so a future session can resume
+directly into implementation with zero lost context — treat it as a
+design doc, not a progress log entry (nothing here is "done").
+
+**Last refreshed** after the GMRS/Aircraft/Ship, New Hams, and
+pagination rounds. The original draft of this section predated those
+features and only covered Amateur + Tower; it is now aligned with the
+API surface that actually exists today, and the SDK facts below were
+re-verified against PyPI and the SDK source rather than carried
+forward from the earlier draft (which had gone materially stale — see
+"Stack" below).
 
 ### Confirmed decisions (from user)
 
 - **Scope: read-only.** Search, browse, detail/attribute lookup,
   identity-grouping/crosslinks, and change-history tools only. No
   watch-creation, no notification-channel management, no admin
-  actions exposed via MCP. This means **no new auth model is needed**
-  at all — every tool an MCP client can call maps to data that's
+  actions exposed via MCP. This means **no new auth model is strictly
+  needed** — every tool an MCP client can call maps to data that's
   already public/anonymous in the existing REST API. This was the
   single biggest scope-reducing decision: it eliminates the hardest
   open question (how an LLM agent would authenticate as a specific
   human user for magic-link-gated actions) entirely, for now.
-- **Transport: remote HTTP/SSE**, hosted alongside the rest of the app
-  (reachable through the existing Cloudflare Tunnel, so any
-  MCP-capable client/agent on the internet can point at it, not just
-  local processes on the user's own machine).
+- **Transport: remote HTTP**, hosted alongside the rest of the app and
+  reachable through the existing Cloudflare Tunnel, so any MCP-capable
+  client on the internet can point at it — not just local processes on
+  the user's own machine.
 - **Deployment: new containerized service** with its own Quadlet,
   calling the existing `api` container over the internal Podman
-  network — not mounted inside the `api` FastAPI process itself. Keeps
-  the MCP protocol dependency, versioning, and crash blast-radius
-  isolated, matching this project's existing one-container-per-concern
-  pattern (`api`, `notifier`, `ingestor`, `web` are all already
-  separate).
+  network — not mounted inside the `api` FastAPI process. This keeps
+  the MCP protocol dependency, its release cadence, and its crash
+  blast-radius isolated from the main API, matching this project's
+  existing one-container-per-concern pattern (`api`, `notifier`,
+  `ingestor`, `web`).
 
 ### Why "thin translation layer," not new data-access code
 
-The existing `api` service already has every read capability this
-server would need, fully built and tested:
+The `api` service already has every read capability this server would
+expose, built and tested. The MCP server should therefore contain
+**zero direct database access** — it is purely an MCP-protocol-speaking
+adapter that calls the existing REST endpoints over the internal
+Podman network (e.g. `http://fcculs-api:8000`) and reshapes JSON into
+MCP tool results. This avoids duplicating SQL in a second place and
+inherits the API's existing validation, rate limiting, and Postgres
+pooling for free.
 
-| Existing REST endpoint | MCP tool it maps to |
+### Tool catalog — all five services, not two
+
+The original draft of this section covered Amateur and Tower only. The
+service now ingests **five** datasets, and the tool surface must match
+or the MCP client sees an arbitrary subset of the app:
+
+| Existing REST endpoint | MCP tool |
 |---|---|
-| `GET /api/search?q=...` (trigram search across callsigns, ASR registration numbers, and licensee/entity names — `api/app/routers/search.py`) | `search_uls(query, limit)` |
-| `GET /api/amateur?...` (paginated/filterable/sortable browse — `amateur.py`) | `browse_amateur(filters, sort, page)` |
-| `GET /api/amateur/{call_sign}` (full attribute + license history + related-identity panel) | `get_amateur_license(call_sign)` |
-| `GET /api/towers?...` | `browse_towers(filters, sort, page)` |
+| `GET /api/search?q=` (12 UNION arms — see below) | `search_uls(query, limit)` |
+| `GET /api/amateur` | `browse_amateur(filters, sort, page)` |
+| `GET /api/amateur/{call_sign}` | `get_amateur_license(call_sign)` |
+| `GET /api/towers` | `browse_towers(filters, sort, page)` |
 | `GET /api/towers/{registration_number}` | `get_tower(registration_number)` |
-| `GET /api/identity/frn/{frn}` (all licenses/towers sharing an FRN — `identity.py`) | `get_identity_group_by_frn(frn)` |
-| `GET /api/identity/address` (entities sharing a mailing address) | `get_identity_group_by_address(...)` |
-| *(new endpoint needed — see below)* | `get_change_history(subject_type, subject_value)` |
+| `GET /api/gmrs` | `browse_gmrs(...)` |
+| `GET /api/gmrs/{call_sign}` | `get_gmrs_license(call_sign)` |
+| `GET /api/aircraft` | `browse_aircraft(...)` |
+| `GET /api/aircraft/{call_sign}` | `get_aircraft_license(call_sign)` |
+| `GET /api/ship` | `browse_ship(...)` |
+| `GET /api/ship/{call_sign}` | `get_ship_license(call_sign)` |
+| `GET /api/identity/frn/{frn}` | `get_identity_group_by_frn(frn)` |
+| `GET /api/identity/address` | `get_identity_group_by_address(...)` |
+| `GET /api/new-hams` | `get_new_hams(page, type)` |
+| *(no endpoint exists yet — genuinely new code)* | `get_change_history(subject_type, subject_value)` |
+| *(no endpoint exists yet — frontend-only data)* | `describe_code(field, value)` |
 
-The MCP server itself should contain **zero direct database access**
-— it's purely an MCP-protocol-speaking adapter calling the existing
-`api` service's REST endpoints (over the internal Podman network,
-e.g. `http://fcculs-api:8000`) and reshaping JSON into MCP tool
-results. This avoids duplicating SQL/query logic in a second place and
-means the MCP server inherits the `api` service's existing rate
-limiting, input validation, and Postgres connection pooling for free.
+Notes on the ones that aren't obvious:
 
-**One real gap to close first**: nothing today exposes `change_events`
-(the diff/history log) over REST at all — the web frontend renders it
-inline on detail pages via a query the `amateur`/`towers` routers
-already do, but there's no standalone `GET /api/.../history` endpoint
-an external client (or this MCP server) could call directly. A small,
-genuinely new `api` endpoint is needed for the `get_change_history`
-tool specifically — everything else is a pure passthrough.
+- **The three personal-radio services come from one router factory.**
+  `api/app/routers/personal_services.py` builds the GMRS/Aircraft/Ship
+  routers from a `SERVICE_CONFIGS` dict. The MCP layer should mirror
+  that: generate the six tools from one config table rather than
+  hand-writing three near-identical pairs, so adding a sixth ULS
+  service later stays a config-dict entry on this side too.
+- **Search is 12 arms, not 4.** `_SEARCH_ARMS` in `search.py` covers a
+  callsign/registration arm and an entity-name arm for each of the five
+  services, **plus two service-specific real-world identifiers**:
+  `aircraft_n_number` (FAA tail number, from `aircr_ac.n_number`) and
+  `ship_name` (from `ship_sh.ship_name`). The `search_uls` tool's
+  docstring must enumerate all of these, because the docstring *is* the
+  tool description the model reasons over — an LLM that doesn't know it
+  can search by tail number or vessel name simply won't.
+- **`identity_by_frn` now spans all five services**, so an FRN lookup
+  surfaces a person's entire FCC footprint in one call (135,619 FRNs
+  hold both an Amateur and a GMRS licence). This is arguably the single
+  most valuable tool in the set for an agent, and worth saying so in its
+  description.
+- **`get_new_hams`** returns dual totals (`total_individuals` /
+  `total_clubs`) over a rolling 10-day window, not the generic `Page`
+  shape — its output model must reflect that rather than reusing the
+  browse pagination shape.
 
-### Proposed stack
+### `describe_code` — a real parity gap worth closing
+
+`web/src/lib/fieldDefs.js` is **409 lines of code decodings**
+(operator class, status codes, applicant type, vessel type, carrier
+type, and so on) that exist **only in the frontend**. Server-side there
+is just `api/app/history_codes.py` (54 lines, HS log codes).
+
+Consequence: an MCP client calling `get_amateur_license` receives raw
+FCC codes with no way to interpret them, while a human on the website
+sees a tooltip explaining each one. That is exactly the second-class
+experience the GMRS/Aircraft/Ship round existed to avoid, reintroduced
+through a different door.
+
+Two options, to be decided at build time:
+
+1. Add a `describe_code(field, value)` tool plus a small
+   `GET /api/field-definitions` endpoint, moving the decoding table (or
+   a generated copy of it) server-side so both the web UI and MCP
+   consume one source of truth.
+2. Have the detail tools inline a `*_description` alongside each coded
+   field in their MCP output, so the model never has to make a second
+   call.
+
+Option 2 is friendlier to an LLM (no extra round trip, no chance of
+skipping the lookup); option 1 is less duplication and also fixes the
+fact that the decoding table is currently unavailable to any non-browser
+consumer. A hybrid — endpoint as the source of truth, inlined at
+render time — is likely correct. Either way this is **new work, not a
+passthrough**, and should not be discovered mid-implementation.
+
+### Stack — re-verified, and materially changed since the last draft
+
+The earlier draft of this section named `FastMCP` from the official
+`mcp` Python SDK. **That is now wrong.** Verified directly against PyPI
+and the SDK source at tag `v2.2.0`:
+
+- `mcp` **2.2.0** is the current release (`requires_python >=3.10`).
+- **`FastMCP` no longer exists.** `src/mcp/server/fastmcp.py` is now a
+  deliberate tombstone that raises `ModuleNotFoundError` on import,
+  pointing at the migration guide. The class is now **`MCPServer`**,
+  imported as `from mcp.server.mcpserver import MCPServer`.
+- The current spec revision is **`2026-07-28`**, which the SDK
+  implements. On that revision there is **no session and no
+  `initialize` handshake** — a request is one self-contained POST, so
+  there is no `Mcp-Session-Id` and no sticky-session requirement. (The
+  `stateless_http=` flag is a legacy-clients-only knob and does *not*
+  govern the modern path.)
+- The SDK pulls in **`httpx2>=2.5.0`** — note the package name. This
+  project's `notifier` uses `httpx` (v1). They are different
+  distributions; do not assume the existing pinned `httpx` satisfies
+  it, and keep the MCP service's `requirements.txt` independent (it is
+  a separate container, so there is no actual conflict to resolve —
+  just don't copy the notifier's pin and expect it to work).
+- Dependencies also include `pydantic>=2.12.0`, `jsonschema`,
+  `pyjwt[crypto]`, and a pinned `mcp-types==2.2.0`.
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Language/runtime | Python 3.12, matching every other service | Consistency; official `mcp` Python SDK (`modelcontextprotocol/python-sdk`) already supports streamable-HTTP/SSE transport server-side |
-| MCP SDK | Official `mcp` package's `FastMCP` server class | Handles JSON-RPC framing, tool schema generation, and the HTTP/SSE transport loop — no protocol code to hand-write |
-| HTTP client to `api` | `httpx.AsyncClient`, already used by `notifier`'s webhook sender | Already a proven dependency in this project |
-| Container base image | `python:3.12-slim`, matching `api`/`notifier`/`ingestor` | Consistency, already covered by the Dependabot docker config once this directory exists |
+| Language/runtime | Python 3.12, matching every other service | Consistency; SDK requires ≥3.10 |
+| MCP SDK | `mcp` 2.x, `MCPServer` class | Handles JSON-RPC framing, tool schema generation from type hints/docstrings, and the HTTP transport loop |
+| HTTP client to `api` | `httpx` (or `httpx2`, already pulled in transitively) | Proven pattern in this project |
+| Container base image | `python:3.12-slim`, non-root `USER` | Matches `api`/`notifier`/`ingestor` and the security-hardening pass |
+
+**Version-pin caution:** `mcp` 2.2.0 was published very recently, and
+2.x is a hard break from 1.x. Pin an exact version in
+`requirements.txt` rather than a floating range, and expect Dependabot
+to open 2.x bumps that need the migration guide checked before merging.
+Anyone who instead wants the old `FastMCP` API must pin `mcp<2`.
 
 ### New repo layout
 
 - `mcp/` — new top-level service directory, sibling to `api`/
   `notifier`/`ingestor`/`web`:
-  - `app/server.py` — `FastMCP` instance, tool registrations.
-  - `app/client.py` — thin `httpx`-based wrapper around the `api`
-    service's REST endpoints (base URL from a new
-    `FCCULS_API_BASE_URL` setting, defaulting to the internal Podman
-    DNS name).
+  - `app/server.py` — `MCPServer` instance and tool registrations.
+  - `app/client.py` — thin `httpx` wrapper over the `api` REST
+    endpoints (base URL from a new `FCCULS_API_BASE_URL` setting,
+    defaulting to the internal Podman DNS name).
+  - `app/services.py` — the config table that generates the
+    GMRS/Aircraft/Ship tool pairs, mirroring `personal_services.py`.
   - `app/config.py` — `pydantic-settings`, following the same
-    `FCCULS_`-prefixed-env-var convention already used elsewhere.
-  - `requirements.txt` — `mcp`, `httpx`, `pydantic-settings`.
-  - `Dockerfile` — non-root `USER`, matching every other service.
-  - `tests/` — mocked unit tests (mock `httpx` calls to a fake `api`,
-    assert correct MCP tool schemas/outputs) plus a
-    `run_integration.sh` spinning up the real `api` container and
-    calling each tool for real against live data, matching this
-    project's established "no mocks-only" testing methodology.
+    `FCCULS_`-prefixed convention as `api`/`notifier`.
+  - `requirements.txt`, `Dockerfile` (non-root), `tests/`.
 
-### Deployment wiring
+> **Directory-name hazard:** a top-level `mcp/` directory shares its
+> name with the `mcp` PyPI package. Depending on how the container's
+> working directory lands on `sys.path`, `import mcp` could resolve to
+> the local directory instead of the installed SDK. Either keep the
+> package root as `mcp/app/` and never add `mcp/__init__.py`, or name
+> the directory something non-colliding (`mcp-server/`, `mcpsrv/`).
+> Decide this **before** scaffolding, not after debugging an import
+> error.
 
-- New `quadlet/fcculs-mcp.container` Quadlet template, modeled on
-  `fcculs-notifier.container` — but since this server needs to be
-  Cloudflare-Tunnel-reachable, it likely gets a new Caddy route
-  (`/mcp/*` proxied to `fcculs-mcp:<port>`) in `web/Caddyfile` rather
-  than a directly tunneled port, so it inherits the same TLS/security-
-  headers handling already applied to the rest of the app.
-- New settings threaded through `deploy/install-quadlets.sh`'s
-  existing substitution-list pattern (`FCCULS_API_BASE_URL` for the
-  MCP container, plus whatever port it listens on internally).
-- `.env.example` gets the new variables documented inline.
-- Since this tool is read-only and unauthenticated by design, the
-  same per-IP rate limiting pattern used for `/api/search`/
-  `/api/amateur`/`/api/towers` should be applied at the Caddy or
-  `api`-call level too — needs a decision at build time, since MCP
-  tool calls could hit `get_amateur_license`/`get_tower` detail
-  endpoints, which currently have **no** rate limit of their own,
-  unlike browse/search (see open items below).
+### Deployment wiring — verified gotchas
 
-### Open items to resolve at build time (not yet decided)
+- New `quadlet/fcculs-mcp.container`, modeled on
+  `fcculs-notifier.container`; new settings threaded through
+  `deploy/install-quadlets.sh`'s substitution list; `.env.example`
+  documented inline — all the existing conventions.
+- **Caddy route:** proxy **both `/mcp` and `/mcp/`.** The SDK's default
+  mount path is `/mcp` (`streamable_http_path`), and it issues a
+  `/mcp` → `/mcp/` redirect. If uvicorn doesn't know it's behind TLS,
+  that redirect points at `http://`, and MCP clients **refuse to follow
+  it** rather than downgrade the connection.
+- **Run uvicorn with `--proxy-headers` and `--forwarded-allow-ips`**
+  set to the proxy address, for exactly the reason above. Note the `api`
+  service already had to solve this same class of problem for the admin
+  cookie's `Secure` flag (see the security-hardening round) — same
+  Caddy + Cloudflare Tunnel chain, same fix.
+- **DNS-rebinding protection is the go-live trap.** Verified in
+  `src/mcp/server/lowlevel/server.py`: when `transport_security is None`
+  **and** the `host=` argument is one of `127.0.0.1` / `localhost` /
+  `::1`, the app **auto-arms** DNS-rebinding protection with a
+  localhost-only allowlist. Behind a real hostname every request then
+  returns **`421 Misdirected Request`**, with the reason logged
+  server-side only — the client just sees a generic transport error.
+  Three important details:
+  - The `host=` argument to the app factory is **not** the uvicorn bind
+    address; passing a real hostname there does not allowlist it, it
+    merely disarms the auto-enable so *everything* is accepted.
+  - `TransportSecurityMiddleware`'s own default (used when settings are
+    absent) is protection **disabled** — so the "secure by default"
+    behavior comes from the app factory, not the middleware.
+  - Constructing `TransportSecuritySettings()` without populating
+    `allowed_hosts` enables the check against an empty allowlist, which
+    rejects *everything*. This is the easiest way to brick the endpoint.
 
-1. **MCP spec version / transport specifics** — confirm which
-   transport revision the current `mcp` Python SDK release
-   defaults to / supports, and pick a spec version to target
-   explicitly (documented in the MCP server's own README).
-2. **Detail-endpoint rate limiting gap** — `GET /api/amateur/{call_sign}`
-   and `GET /api/towers/{registration_number}` currently have no
-   per-IP rate limit (only browse/search do). An MCP agent making
-   rapid detail-lookup tool calls would hit this unthrottled path —
-   needs its own small rate-limit addition as a prerequisite, or the
-   MCP layer needs to apply its own limiting in front of them.
-3. **New `get_change_history` endpoint's shape** — needs a schema
-   decision (pagination? date-range filtering? subject_type validation
-   against the same allow-list `watches.py` already uses).
-4. **Public discoverability/robots** — an MCP endpoint reachable over
-   the same Cloudflare Tunnel as the rest of the app is, by
-   definition, internet-reachable by any MCP-aware client, not just
-   ones the user intends. Decide whether this needs any access
-   control at all (e.g. a shared bearer token in the MCP transport
-   headers) given "read-only + no auth" was the explicit choice here.
-5. **Tool result size limits** — LLM context windows mean tool outputs
-   (e.g. a `browse_amateur` call with a huge result set) need sensible
-   default/max page sizes distinct from the web frontend's own
-   defaults.
+  Behind Caddy, which already controls the `Host` header, the SDK docs
+  explicitly bless
+  `TransportSecuritySettings(enable_dns_rebinding_protection=False)` as
+  "the honest configuration". Whichever is chosen, it must be an
+  explicit, commented decision in `server.py` — not a default nobody
+  looked at.
+- **Consider `json_response=True`.** It answers each POST with a single
+  JSON body instead of an SSE stream, which is friendlier to a
+  buffering proxy and to Cloudflare Tunnel's idle-timeout behavior. The
+  cost (loss of per-call progress notifications and the back-channel) is
+  irrelevant to a read-only server with fast tools.
+- **Do not `Mount()` the MCP app inside another Starlette/FastAPI app**
+  without hoisting its lifespan — the sub-app's lifespan never runs and
+  the first request fails with `Task group is not initialized`. Since
+  the decision here is a standalone container, this only matters if that
+  decision is ever revisited.
+- **Health endpoint:** `@mcp.custom_route("/health", methods=["GET"])`.
+  Note these custom routes are deliberately **never authenticated**,
+  which is fine for `/health` and must not be used for anything else.
 
-### Todos (create in SQL `todos` table when this moves from planning to implementation)
+### Prerequisite: close the rate-limiting gaps first
 
-- `mcp-server-scaffold` — New `mcp/` service directory: `FastMCP`
-  server, config, Dockerfile (non-root), requirements.
-- `mcp-tool-search-browse` — Implement `search_uls`, `browse_amateur`,
-  `browse_towers`, `get_amateur_license`, `get_tower` tools as thin
-  `httpx` passthroughs to the existing `api` REST endpoints.
-- `mcp-tool-identity-grouping` — Implement `get_identity_group_by_frn`
-  and `get_identity_group_by_address` tools.
-- `api-change-history-endpoint` — New read-only `GET .../history`
-  endpoint(s) on the existing `api` service (genuinely new code, not a
-  passthrough) to back the new `get_change_history` MCP tool.
-- `mcp-tool-change-history` — Implement `get_change_history` tool
-  against the new endpoint above.
-- `mcp-quadlet-deploy` — `quadlet/fcculs-mcp.container`, `.env.example`
-  entries, `install-quadlets.sh` substitution wiring, `Caddyfile`
-  `/mcp/*` route.
-- `mcp-detail-endpoint-rate-limit` — Close the pre-existing rate-limit
-  gap on `GET /api/amateur/{call_sign}` and
-  `GET /api/towers/{registration_number}` before/alongside exposing
-  them through an unauthenticated MCP tool surface.
-- `mcp-tests` — Mocked unit tests + a real `run_integration.sh`
+Exposing an unauthenticated, agent-driven tool surface over the public
+internet makes the API's existing throttling gaps materially worse — an
+LLM client can trivially issue calls in a tight loop. Verified against
+the current code:
+
+| Router | Browse | Detail |
+|---|---|---|
+| `amateur.py` | rate-limited | **not limited** |
+| `towers.py` | rate-limited | **not limited** |
+| `personal_services.py` (gmrs/aircraft/ship) | rate-limited | rate-limited |
+| `search.py`, `new_hams.py` | rate-limited | — |
+| `identity.py` | **no rate limiting at all** | **no rate limiting at all** |
+
+Two distinct problems:
+
+1. **Amateur and Tower detail endpoints are unthrottled**, while the
+   three newer services' detail endpoints (built later, via the router
+   factory) *are*. This asymmetry is an oversight, not a design
+   decision, and is already tracked as `mcp-detail-endpoint-rate-limit`.
+2. **`identity.py` imports no rate limiter whatsoever** — neither
+   `/api/identity/frn/{frn}` nor `/api/identity/address` is throttled.
+   The original draft of this section never flagged this, and these are
+   the *most* expensive queries in the app (cross-service materialized
+   view lookups) as well as the most attractive to an agent. This needs
+   its own todo.
+
+### Open items to resolve at build time
+
+1. **`get_change_history` endpoint shape** — nothing exposes
+   `change_events` over REST today; detail pages render it inline via
+   the routers' own queries. Needs decisions on pagination, date-range
+   filtering, and whether `subject_type` is validated against the same
+   allow-list `watches.py` uses (which now includes `frn` and
+   `asr_registration_number`, and carries an optional `service`).
+2. **`describe_code` vs. inlined descriptions** — see above.
+3. **Tool result size limits.** MCP has *no* protocol-level limit on
+   `tools/call` output and the SDK does no truncation; pagination in the
+   protocol applies only to `list_*` methods. Per-tool
+   `Annotated[int, Field(ge=1, le=...)]` `limit` parameters plus
+   explicit truncation are entirely the server's job, and defaults
+   should be **smaller** than the web UI's 25/page — an LLM context
+   window is the real constraint.
+4. **Access control.** Read-only and unauthenticated was the explicit
+   choice, matching the app's already-public search/browse surface. If
+   that's revisited, the idiomatic path is a `TokenVerifier` +
+   `AuthSettings` pair (a shared bearer token is the SDK's own
+   documented example); note the two must be passed together or
+   construction raises, `validate_token_resource=True` should be set
+   explicitly, and `resource_server_url` must exactly match the public
+   Cloudflare hostname + `/mcp`.
+5. **Tool annotations.** Mark every tool
+   `ToolAnnotations(read_only_hint=True, open_world_hint=False)` — but
+   treat these as hints for client UX, never as enforcement.
+6. **Structured output.** The SDK derives `outputSchema` from the return
+   type annotation and *validates* returns against it, so returning
+   typed models gets machine-readable results for free. Watch the silent
+   trap: a class with no class-body annotations yields no schema and
+   falls back to `repr()` with no warning.
+
+### Todos (to be created when this moves from planning to implementation)
+
+- `mcp-server-scaffold` — New service directory (name chosen to avoid
+  the `mcp` import collision): `MCPServer` instance, config, non-root
+  Dockerfile, exact-pinned requirements.
+- `mcp-tool-search-browse` — `search_uls` (documenting all 12 search
+  arms including `n_number`/`ship_name`), plus browse+detail tools for
+  **all five** services, with the GMRS/Aircraft/Ship six generated from
+  one config table.
+- `mcp-tool-identity-grouping` — `get_identity_group_by_frn` and
+  `get_identity_group_by_address`, both now spanning five services.
+- `mcp-tool-new-hams` — `get_new_hams`, respecting the dual-total
+  response shape and the 10-day window.
+- `api-field-definitions` — Move/expose `fieldDefs.js`'s decodings
+  server-side and decide inline-vs-tool, so MCP clients don't receive
+  undecodable raw FCC codes.
+- `mcp-tool-describe-code` — The corresponding tool (or the inlining
+  work, depending on the decision above).
+- `api-change-history-endpoint` — New read-only history endpoint on the
+  `api` service (genuinely new code, not a passthrough).
+- `mcp-tool-change-history` — The tool backed by that endpoint.
+- `mcp-detail-endpoint-rate-limit` — Close the gap on
+  `GET /api/amateur/{call_sign}` and
+  `GET /api/towers/{registration_number}`, bringing them in line with
+  the personal-services detail endpoints.
+- `api-identity-rate-limit` — Add rate limiting to `identity.py`'s two
+  endpoints, which currently have none at all.
+- `mcp-quadlet-deploy` — Quadlet unit, `.env.example` entries,
+  `install-quadlets.sh` wiring, Caddy routes for both `/mcp` and
+  `/mcp/`, `--proxy-headers`, and an explicit documented
+  `transport_security` decision.
+- `mcp-tests` — Mocked unit tests plus a real `run_integration.sh`
   exercising every tool against a live `api` + Postgres.
-- `mcp-docs` — README section covering how to point an MCP client at
-  the server, plus a `docs/plan.md` progress-log entry once built.
+- `mcp-docs` — README section on pointing an MCP client at the server,
+  the targeted spec revision (`2026-07-28`), and a `docs/plan.md`
+  progress-log entry once built.
 
-Dependencies: `mcp-server-scaffold` blocks everything else;
-`api-change-history-endpoint` blocks `mcp-tool-change-history` only;
-`mcp-detail-endpoint-rate-limit` should land before or alongside
-`mcp-quadlet-deploy` (i.e. before the server is actually
-internet-reachable); `mcp-tests` and `mcp-docs` come last.
+Dependencies: `mcp-server-scaffold` blocks every other `mcp-*` item.
+`api-change-history-endpoint` blocks `mcp-tool-change-history`;
+`api-field-definitions` blocks `mcp-tool-describe-code`.
+`mcp-detail-endpoint-rate-limit` and `api-identity-rate-limit` must both
+land **before** `mcp-quadlet-deploy` (i.e. before the surface is
+internet-reachable). `mcp-tests` and `mcp-docs` come last. The two
+`api-*` rate-limit items are independent of everything else and could
+land at any time — they are pre-existing gaps that happen to be
+sharpened by this feature.
 
-Testing (once built): this project's established methodology — mocked
-unit tests for each tool's request/response shaping, then a
-disposable-container integration run against the real `api` +
-Postgres, then live verification on production by pointing a real MCP
-client at the deployed `/mcp` endpoint and confirming each tool
-returns real data end-to-end, before considering any todo done.
+### Testing (once built)
 
+This project's established methodology — mocked unit tests for each
+tool's request/response shaping, then a disposable-container
+integration run against the real `api` + Postgres exercising every
+tool, then live verification on production by pointing a real MCP
+client at the deployed endpoint and confirming each tool returns real
+data end-to-end, before considering any todo done.
+
+Two verifications specific to this feature, both learned from the SDK
+source rather than assumed:
+
+- **Confirm the endpoint answers behind the real hostname**, not just
+  from inside the container. The `421`/host-allowlist failure mode is
+  invisible except in the server log and would otherwise be discovered
+  by a user, not by us.
+- **Confirm the `/mcp` → `/mcp/` redirect resolves over HTTPS**, since
+  a missing `--proxy-headers` produces a redirect that MCP clients
+  deliberately refuse to follow.
