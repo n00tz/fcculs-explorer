@@ -2,11 +2,12 @@
 
 [![Tests](https://github.com/n00tz/fcculs-explorer/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/n00tz/fcculs-explorer/actions/workflows/tests.yml)
 
-Self-hostable service for browsing FCC ULS Amateur Radio Service and Antenna
-Structure Registration (Tower) data, with watch-based alerting (email,
-email-to-SMS, or generic webhook) on changes to a specific callsign or ULS
-ID. Built for a single rootless-Podman host, no paid third-party services
-required.
+Self-hostable service for browsing FCC ULS personal radio licence data —
+Amateur Radio, GMRS, Aircraft (Part 87) and Ship (Part 80) — plus Antenna
+Structure Registration (Tower) records, with watch-based alerting (email,
+email-to-SMS, or generic webhook) on changes to a specific callsign, FRN,
+or ULS ID. Built for a single rootless-Podman host, no paid third-party
+services required.
 
 ## Status
 
@@ -21,20 +22,21 @@ rather than deploy or administer it? See `docs/user-guide.md`.**
 
 | Concern | Choice |
 |---|---|
-| API | Python 3.12 + FastAPI |
+| API | Python 3.14 + FastAPI |
 | Database | PostgreSQL 16 (`pg_trgm` search) |
 | Cache/Queue | Redis 7 + RQ |
 | Scheduler | APScheduler (inside the `ingestor` container) |
 | Frontend | SvelteKit, static-adapter SPA build |
 | Reverse proxy / static server | Caddy |
 | Auth | Passwordless magic-link email, signed session cookies |
+| MCP server | Python 3.14 + official `mcp` SDK, read-only tools at `/mcp` |
 | Deployment | Rootless Podman + `podman compose` / `docker compose` |
 
 ## Software Bill of Materials
 
 The table above names the architectural choices; this is the actual
 dependency manifest, kept here (rather than only in each service's
-lockfile) so a reviewer or auditor doesn't have to open five different
+lockfile) so a reviewer or auditor doesn't have to open six different
 files to see everything the app pulls in. Update this section whenever a
 `requirements.txt`/`package.json`/base-image tag changes (Dependabot PRs
 bump these regularly — see Development / Testing Methodology below).
@@ -44,7 +46,7 @@ is tracked automatically by `.github/dependabot.yml`'s `docker` entries):
 
 | Image | Used by |
 |---|---|
-| `python:3.14-slim` | `api`, `ingestor`, `notifier` |
+| `python:3.14-slim` | `api`, `ingestor`, `notifier`, `mcpsrv` |
 | `node:26-slim` (build stage only) | `web` |
 | `caddy:2-alpine` (runtime stage) | `web` |
 | `postgres:16-alpine` | `postgres` service (`compose.yaml`) |
@@ -74,6 +76,19 @@ across a container boundary. The two drifted apart once already (api on
 **`notifier/requirements.txt`** — RQ worker + delivery senders:
 `psycopg[binary]==3.3.*`, `rq==2.12.*`, `redis==8.*`, `httpx==0.28.*`,
 `pytest==9.*`
+
+**`mcpsrv/requirements.txt`** — MCP server (read-only tools for MCP
+clients): `mcp==2.2.*`, `httpx2==2.12.*`, `uvicorn[standard]==0.52.*`
+
+This is the one service that does **not** use `httpx==0.28.*` like the
+rest of the stack. The MCP SDK requires `httpx2` — Pydantic's
+continuation of `httpx` under a new distribution *and* a new import name
+(`import httpx2`) — so this service uses that instead of shipping two
+HTTP stacks in one image. Don't "fix" the inconsistency by aligning it
+with the others; they are different packages, not different versions of
+one package. Note also that `mcp` 2.2 removed `FastMCP`: the server class
+is `mcp.server.mcpserver.MCPServer`, so a major `mcp` bump warrants
+reading the migration notes rather than merging on green CI alone.
 
 **`web/package.json`** — SvelteKit frontend build tooling (build-time
 only; these compile the app but don't ship any code of their own into
@@ -106,6 +121,9 @@ notifier/   RQ worker (app/worker.py) + dispatcher (app/dispatch.py) that
             match new change_events to active watches and deliver via SMTP,
             email-to-SMS gateways, or webhooks (ntfy/Discord/Telegram/Matrix
             presets included). Single image, two roles. notifier/Dockerfile
+mcpsrv/     MCP server exposing read-only tools over streamable HTTP for
+            MCP-capable clients/agents. Named `mcpsrv/`, not `mcp/`, so it
+            can't shadow the `mcp` SDK package on sys.path. mcpsrv/Dockerfile
 web/        SvelteKit frontend (static SPA) + Caddyfile + web/Dockerfile
             (multi-stage Node build -> Caddy runtime image)
 db/         SQL migrations, applied in filename order by the `migrate`
@@ -483,6 +501,72 @@ dependent app units (Requires propagation) — restart them afterward, or
 just re-run `deploy/install-quadlets.sh`.
 
 
+## MCP Server (for LLM clients and agents)
+
+The stack ships an [MCP](https://modelcontextprotocol.io) server that
+exposes the same public data the web UI shows, as tools an MCP-capable
+client (Claude Desktop, Copilot CLI, an agent framework, …) can call
+directly. It runs as its own container (`mcpsrv/`) and is published by
+Caddy at `<PUBLIC_BASE_URL>/mcp` using the **streamable HTTP** transport.
+
+Point a client at it with no credentials:
+
+```
+https://your-host.example/mcp
+```
+
+### Available tools
+
+| Tool | What it does |
+|---|---|
+| `search_uls` | Search all services at once by callsign, tower registration number, or licensee name |
+| `browse_licenses` | List/filter/sort licences for `amateur`, `gmrs`, `aircraft` or `ship` |
+| `browse_towers` | List/filter/sort registered antenna structures |
+| `get_license` | Full record for one callsign in a given service |
+| `get_tower` | Full record for one ASR registration number |
+| `get_identity_by_frn` | Everything one FRN holds, across all services |
+| `get_identity_by_address` | Every licensee at one mailing address |
+| `get_change_history` | What changed on a callsign/FRN over time, from the daily ingests |
+| `get_new_hams` | First-time amateur licensees and new club stations |
+| `describe_code` | Translate one raw FCC code (e.g. status `A`) into plain English |
+| `list_field_definitions` | The whole field/code reference in one call |
+
+### Design notes
+
+- **Read-only, and therefore unauthenticated.** Every tool maps to data
+  the REST API already serves anonymously. There is no watch creation, no
+  notification-channel management and no admin surface here, which is
+  exactly why it needs no auth model of its own. If you'd rather not
+  publish it at all, delete the `handle /mcp*` block from
+  `web/Caddyfile` and rebuild the `web` image.
+- **No database access.** The service holds no database credentials and
+  opens no connection; it calls the `api` container over the internal
+  network, inheriting its validation, rate limiting and pooling.
+- **Result sizes are capped** (`MCP_DEFAULT_PAGE_SIZE`,
+  `MCP_MAX_PAGE_SIZE`) because the MCP protocol imposes no limit of its
+  own and an unbounded browse would flood a client's context window.
+
+### If a client can't connect
+
+Two failure modes account for almost everything, and both are quiet:
+
+- **`421 Misdirected Request`** — the SDK's DNS-rebinding protection is
+  armed and rejecting the proxied `Host`. This is logged server-side only,
+  so the client just sees a failed connection. Behind Caddy (which
+  controls the `Host` header) it must be off:
+  `FCCULS_MCP_DNS_REBINDING_PROTECTION=false`, which is the shipped
+  default. Note that the SDK arms this **implicitly** if you configure
+  nothing, so it must be set deliberately.
+- **A redirect the client refuses to follow** — the SDK redirects `/mcp`
+  to `/mcp/`. If the upstream doesn't see `X-Forwarded-Proto`, it builds
+  that redirect as `http://`, and MCP clients will not follow a downgrade.
+  The Caddy route sets the header and the server runs with
+  `proxy_headers=True`; if you replace the proxy, preserve both.
+
+Check `podman logs mcp` (or `journalctl --user -u fcculs-mcp.service`)
+when diagnosing — the server logs every upstream API call it makes.
+
+
 ## Configuration Reference (`.env`)
 
 | Variable | Used by | Purpose |
@@ -498,6 +582,7 @@ just re-run `deploy/install-quadlets.sh`.
 | `INGEST_CRON_HOUR`, `INGEST_CRON_MINUTE` | ingestor | UTC time of the daily ingest job (default 13:30, chosen to sit after FCC's ~05:00–13:00 UTC daily-file publication window) |
 | `MAX_DELIVERY_ATTEMPTS` | notifier | Retry cap per notification delivery |
 | `DISPATCH_INTERVAL_SECONDS` | notifier-dispatch | Polling interval for matching new `change_events` to watches |
+| `MCP_DEFAULT_PAGE_SIZE`, `MCP_MAX_PAGE_SIZE` | mcp | Default/maximum results per MCP tool call (default 10/50). Lower than the REST API's own page sizes because tool results are consumed by LLMs with finite context windows |
 | `BACKUP_DIR` | deploy/backup.sh, fcculs-backup.timer | Host directory daily `pg_dump` backups are written to (default `~/fcculs-backups`); override per-run with `FCCULS_BACKUP_DIR` |
 | `BACKUP_RETENTION_DAYS` | deploy/backup.sh, fcculs-backup.timer | Backups older than this are deleted on every backup run (default 3 days); override per-run with `FCCULS_BACKUP_RETENTION_DAYS` |
 

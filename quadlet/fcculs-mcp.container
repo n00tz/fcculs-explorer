@@ -1,0 +1,31 @@
+[Unit]
+Description=FCC ULS Explorer MCP server (read-only tools for MCP clients)
+After=fcculs-api.service
+# api is Wants-only (not Requires) so restarting the api does not
+# cascade-stop this unit; matches fcculs-api.container's treatment of
+# redis. Every tool call is an HTTP request to the api, which will simply
+# fail and return a structured error while the api is briefly down.
+Wants=fcculs-api.service
+
+[Container]
+Image=%MCP_IMAGE%
+ContainerName=mcp
+Network=fcculs.network
+# Talks to the api over the internal container network only; this service
+# holds no database credentials and opens no database connection.
+Environment=FCCULS_API_BASE_URL=http://api:8000
+Environment=FCCULS_MCP_PORT=8080
+Environment=FCCULS_MCP_MOUNT_PATH=/mcp
+# Caddy terminates TLS and controls the Host header, so the SDK's
+# DNS-rebinding protection is redundant here. Left enabled it would
+# reject every proxied request with 421 Misdirected Request.
+Environment=FCCULS_MCP_DNS_REBINDING_PROTECTION=false
+Environment=FCCULS_MCP_DEFAULT_PAGE_SIZE=%MCP_DEFAULT_PAGE_SIZE%
+Environment=FCCULS_MCP_MAX_PAGE_SIZE=%MCP_MAX_PAGE_SIZE%
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

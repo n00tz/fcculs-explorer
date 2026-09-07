@@ -133,6 +133,24 @@ services:
     # sleeps. No separate process supervisor needed for a two-role image.
     command: ["/bin/sh", "-c", "while true; do python -m app.dispatch; sleep ${DISPATCH_INTERVAL_SECONDS:-60}; done"]
 
+  mcp:
+    build: ./mcpsrv
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # No database credentials here on purpose: every tool is a
+      # passthrough to the api service over the internal network.
+      FCCULS_API_BASE_URL: http://api:8000
+      FCCULS_MCP_PORT: "8080"
+      FCCULS_MCP_MOUNT_PATH: /mcp
+      # Caddy controls the Host header, so the SDK's DNS-rebinding
+      # protection is redundant. Left on, it would reject every proxied
+      # request with 421 Misdirected Request.
+      FCCULS_MCP_DNS_REBINDING_PROTECTION: "false"
+      FCCULS_MCP_DEFAULT_PAGE_SIZE: "${MCP_DEFAULT_PAGE_SIZE:-10}"
+      FCCULS_MCP_MAX_PAGE_SIZE: "${MCP_MAX_PAGE_SIZE:-50}"
+
   web:
     build:
       context: ./web
@@ -145,6 +163,7 @@ services:
     restart: unless-stopped
     depends_on:
       - api
+      - mcp
     ports:
       - "${PUBLISHED_PORT:-8080}:8080"
 

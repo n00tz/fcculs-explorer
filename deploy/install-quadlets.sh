@@ -67,6 +67,10 @@ INGEST_CRON_MINUTE="${ENVVALS[INGEST_CRON_MINUTE]:-30}"
 MAX_DELIVERY_ATTEMPTS="${ENVVALS[MAX_DELIVERY_ATTEMPTS]:-5}"
 DISPATCH_INTERVAL_SECONDS="${ENVVALS[DISPATCH_INTERVAL_SECONDS]:-60}"
 QUEUE_NAME="${ENVVALS[QUEUE_NAME]:-fcculs-notifications}"
+# MCP tool results are consumed by LLMs with finite context windows, so
+# these default lower than the REST API's own page sizes.
+MCP_DEFAULT_PAGE_SIZE="${ENVVALS[MCP_DEFAULT_PAGE_SIZE]:-10}"
+MCP_MAX_PAGE_SIZE="${ENVVALS[MCP_MAX_PAGE_SIZE]:-50}"
 
 # Images: Quadlet can't `build:` like Compose, so point at locally built
 # images (build them first -- see README's Quadlet section) unless
@@ -75,6 +79,7 @@ API_IMAGE="${ENVVALS[API_IMAGE]:-localhost/fcculs-api:latest}"
 INGESTOR_IMAGE="${ENVVALS[INGESTOR_IMAGE]:-localhost/fcculs-ingestor:latest}"
 NOTIFIER_IMAGE="${ENVVALS[NOTIFIER_IMAGE]:-localhost/fcculs-notifier:latest}"
 WEB_IMAGE="${ENVVALS[WEB_IMAGE]:-localhost/fcculs-web:latest}"
+MCP_IMAGE="${ENVVALS[MCP_IMAGE]:-localhost/fcculs-mcp:latest}"
 
 # Enforce the same "no hardcoded secrets" rule compose.yaml enforces via
 # ${VAR:?...}: refuse to install with placeholder/missing secrets.
@@ -115,10 +120,13 @@ render() { # render <template-file> <output-file>
   content="${content//%MAX_DELIVERY_ATTEMPTS%/$MAX_DELIVERY_ATTEMPTS}"
   content="${content//%DISPATCH_INTERVAL_SECONDS%/$DISPATCH_INTERVAL_SECONDS}"
   content="${content//%QUEUE_NAME%/$QUEUE_NAME}"
+  content="${content//%MCP_DEFAULT_PAGE_SIZE%/$MCP_DEFAULT_PAGE_SIZE}"
+  content="${content//%MCP_MAX_PAGE_SIZE%/$MCP_MAX_PAGE_SIZE}"
   content="${content//%API_IMAGE%/$API_IMAGE}"
   content="${content//%INGESTOR_IMAGE%/$INGESTOR_IMAGE}"
   content="${content//%NOTIFIER_IMAGE%/$NOTIFIER_IMAGE}"
   content="${content//%WEB_IMAGE%/$WEB_IMAGE}"
+  content="${content//%MCP_IMAGE%/$MCP_IMAGE}"
   printf '%s\n' "$content" > "$dst"
 }
 

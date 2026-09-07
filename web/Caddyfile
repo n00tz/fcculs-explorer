@@ -18,6 +18,23 @@
 		reverse_proxy api:8000
 	}
 
+	# MCP server. Both /mcp and /mcp/* must be matched: the SDK mounts the
+	# transport at /mcp and issues its own /mcp -> /mcp/ redirect, so a
+	# /mcp/* -only rule would 404 the very first request a client makes.
+	handle /mcp* {
+		reverse_proxy mcp:8080 {
+			# MCP clients refuse to follow a redirect that downgrades to
+			# http://, so the upstream must see the real scheme to build
+			# its redirect correctly.
+			header_up X-Forwarded-Proto {scheme}
+			# Tool calls proxy through to the API and can outlast Caddy's
+			# default 100s stream timeout on a slow query.
+			transport http {
+				response_header_timeout 120s
+			}
+		}
+	}
+
 	# Static SvelteKit SPA build; try_files falls back to index.html for any
 	# route SvelteKit didn't statically prerender (client-side routing).
 	handle {

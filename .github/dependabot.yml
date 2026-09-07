@@ -17,13 +17,18 @@ updates:
     schedule:
       interval: "weekly"
 
+  - package-ecosystem: "pip"
+    directory: "/mcpsrv"
+    schedule:
+      interval: "weekly"
+
   # SvelteKit frontend dependencies.
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:
       interval: "weekly"
 
-  # Dockerfile base images (python:3.12-slim, node:22-slim,
+  # Dockerfile base images (python:3.14-slim, node:26-slim,
   # postgres:16-alpine, redis:7-alpine, caddy:2-alpine, etc.) -- these
   # tags float, so a locally cached build won't pick up a new
   # patch/security release upstream on its own. One entry per
@@ -46,5 +51,10 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/web"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/mcpsrv"
     schedule:
       interval: "weekly"

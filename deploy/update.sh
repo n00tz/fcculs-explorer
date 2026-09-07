@@ -75,6 +75,7 @@ API_IMAGE="${ENVVALS[API_IMAGE]:-localhost/fcculs-api:latest}"
 INGESTOR_IMAGE="${ENVVALS[INGESTOR_IMAGE]:-localhost/fcculs-ingestor:latest}"
 NOTIFIER_IMAGE="${ENVVALS[NOTIFIER_IMAGE]:-localhost/fcculs-notifier:latest}"
 WEB_IMAGE="${ENVVALS[WEB_IMAGE]:-localhost/fcculs-web:latest}"
+MCP_IMAGE="${ENVVALS[MCP_IMAGE]:-localhost/fcculs-mcp:latest}"
 # Strip a trailing ":latest" (or any tag) so we can append our own tags below.
 img_repo() { echo "${1%:*}"; }
 
@@ -115,7 +116,7 @@ if [[ "$FORCE" -eq 0 && "$BEFORE_SHA" == "$AFTER_SHA" ]]; then
   # api alone would then wrongly report "already up to date" forever,
   # until --force is passed manually.
   all_up_to_date=1
-  for image_ref in "$API_IMAGE" "$INGESTOR_IMAGE" "$NOTIFIER_IMAGE" "$WEB_IMAGE"; do
+  for image_ref in "$API_IMAGE" "$INGESTOR_IMAGE" "$NOTIFIER_IMAGE" "$WEB_IMAGE" "$MCP_IMAGE"; do
     existing_rev="$(podman image inspect --format '{{ index .Labels "org.opencontainers.image.revision" }}' "$image_ref" 2>/dev/null || true)"
     if [[ "$existing_rev" != "$AFTER_SHA" ]]; then
       all_up_to_date=0
@@ -149,6 +150,7 @@ build_image() { # build_image <context-dir> <image-ref> [extra "--build-context 
 build_image "$REPO_DIR/api"      "$API_IMAGE"
 build_image "$REPO_DIR/ingestor" "$INGESTOR_IMAGE"
 build_image "$REPO_DIR/notifier" "$NOTIFIER_IMAGE"
+build_image "$REPO_DIR/mcpsrv"   "$MCP_IMAGE"
 # web needs docs/user-guide.md (outside its own build context) to embed as
 # a static asset for the in-app Help page -- see web/Dockerfile's
 # `COPY --from=docs` and compose.yaml's matching `additional_contexts`.
@@ -181,12 +183,16 @@ systemctl --user restart fcculs-api.service
 systemctl --user restart fcculs-ingestor.service
 systemctl --user restart fcculs-notifier-worker.service
 systemctl --user restart fcculs-notifier-dispatch.service
+# mcp before web: web (Caddy) proxies /mcp to it, so bringing the upstream
+# up first avoids a window where the route 502s.
+systemctl --user restart fcculs-mcp.service
 systemctl --user restart fcculs-web.service
 
 echo ""
 echo "Restart complete. Quick status check:"
 systemctl --user is-active fcculs-migrate.service fcculs-api.service fcculs-ingestor.service \
-  fcculs-notifier-worker.service fcculs-notifier-dispatch.service fcculs-web.service || true
+  fcculs-notifier-worker.service fcculs-notifier-dispatch.service fcculs-mcp.service \
+  fcculs-web.service || true
 echo ""
 echo "Verify: curl http://localhost:\${PUBLISHED_PORT:-8080}/"
 echo "Rollback if needed: re-tag a prior commit's image, e.g."
