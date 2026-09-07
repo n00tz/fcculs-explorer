@@ -100,10 +100,20 @@ db/         SQL migrations, applied in filename order by the `migrate`
             Compose service
 deploy/     deploy/smoke_test.sh -- a scripted Podman-pod smoke test used
             to validate that built images actually start and respond
-docs/       Implementation plan/progress log (plan.md) and the end-user
-            guide (user-guide.md)
+docs/       Implementation plan/progress log (plan.md), the end-user
+            guide (user-guide.md), and architecture diagrams
+            (architecture.md -- data flow + operational logic)
 compose.yaml, .env.example   Compose stack definition (repo root)
 ```
+
+## Architecture Diagrams
+
+[`docs/architecture.md`](docs/architecture.md) is the visual companion to
+this README: Mermaid data-flow diagrams and operational-logic flowcharts
+covering container topology, the ingestion catch-up and per-row decision
+logic, the notification pipeline, authentication, the deploy path, and
+runbooks for install/gap-recovery/backup. Start there when you want to
+understand *how* the system behaves rather than how to configure it.
 
 ## Data Sources
 
@@ -213,6 +223,11 @@ amateur:
 table has a `UNIQUE (service, data_date)` constraint, so an
 already-ingested day is skipped without even downloading the file, and
 row-level upserts mean a forced re-ingest never duplicates data.
+
+> See [`docs/architecture.md` §3](docs/architecture.md#3-ingestion-daily-catch-up-logic)
+> for a flowchart of this catch-up logic, and
+> [§12](docs/architecture.md#12-operational-runbook) for a decision tree
+> on diagnosing a suspected gap.
 
 > **If the stack is down for more than 7 days**, the missed days have
 > already been overwritten upstream and cannot be recovered from the
@@ -350,6 +365,10 @@ whatever's checked out, e.g. to test an uncommitted change), `--no-restart`
 (build/tag only). To roll back, re-tag an older `:<short-sha>` image as
 `:latest` and restart that unit (the script prints the exact command at the
 end of a run).
+
+> [`docs/architecture.md` §11](docs/architecture.md#11-deployment-updatesh)
+> diagrams this flow, including why the skip-if-unchanged check inspects
+> all four images' revision labels rather than just `api`'s.
 
 ### Backups
 

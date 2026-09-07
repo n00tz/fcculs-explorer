@@ -1726,6 +1726,57 @@ commands for a given test run are chained into a single SSH invocation.
   likely way a new instance silently starts with a data gap).
   `docs/user-guide.md` updated for the 10-day window and sort order.
 
+### Architecture diagrams (`docs/architecture.md`)
+
+- **Motivation**: the repo had thorough prose documentation (README for
+  deployment/config, user-guide for end users, this plan for history) but
+  nothing that showed the *shape* of the system — how data moves, and
+  what decisions each component makes. Several behaviours that took real
+  investigation to get right (the FCC weekday-rotation catch-up, the
+  synthetic-event/`is_new_operator` branch, the dispatch/worker split,
+  the all-four-images revision check) were documented only as paragraphs
+  of explanation or as commit archaeology.
+- **Format: Mermaid in Markdown**, deliberately. GitHub renders it
+  natively, so there is no build step, no image toolchain, and no
+  generated `.svg`/`.png` assets that can silently drift out of sync with
+  the source — the diagram *is* the source, editable in a normal diff.
+- **14 diagrams across 12 sections**: container topology; level-0 data
+  flow; the daily catch-up flowchart; the per-row ingest decision tree;
+  the notification pipeline (sequence); delivery state machine; the
+  magic-link auth sequence; test-send; the read-request lifecycle;
+  an ERD of the data model; the `update.sh` decision flow; and
+  operational runbooks for fresh install, gap diagnosis, and
+  backup/restore.
+- **Content is derived from the code, not from memory** — each diagram
+  was written after re-reading the relevant module (`dispatch.py`,
+  `matcher.py`, `jobs.py`, `ingest.py`, `scheduler.py`, `auth.py`,
+  `main.py`, `Caddyfile`, the `db/*.sql` migrations), so the branches
+  shown match what actually executes. Several diagrams pair with a short
+  "why" note capturing the non-obvious rationale (double idempotency
+  guard in matching, why `is_new_operator` is stored rather than derived,
+  why the worker rather than the api owns the `is_verified` write, why
+  the host-header allow-list check exists).
+- **Verification** (Mermaid fails *silently* on GitHub — a broken diagram
+  renders as nothing, so this needed real checking, not eyeballing):
+  - First pass with `mermaid.parse()` under jsdom in a disposable
+    `node:22-slim` container. Initially reported "ALL DIAGRAMS VALID"
+    while having found **0 blocks** — the extraction regex didn't match
+    CRLF line endings. Caught by asserting the block count, not just the
+    pass/fail; fixed and confirmed 14/14 parse.
+  - Parse-only proved insufficient: jsdom can't render (no
+    `CSSStyleSheet`), and parsing wouldn't catch HTML-in-label issues.
+    Ran a full browser render via the `minlag/mermaid-cli` container —
+    **14/14 rendered**, all SVGs non-empty.
+  - That render surfaced a real defect: `<b>` emphasis renders as
+    *literal* `&lt;b&gt;` text inside `sequenceDiagram` messages (which
+    escape HTML), unlike flowchart labels where it renders correctly.
+    One occurrence in the auth diagram; rewritten without markup and
+    re-rendered to confirm 0 literal tags remain.
+- **Cross-referenced, not inlined**: linked from README's Repository
+  Layout as its own short section, plus targeted pointers from the three
+  places a reader is most likely to want a picture — the daily-file
+  explanation (§3 + §12), `update.sh` (§11), and gap diagnosis.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
