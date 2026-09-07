@@ -1540,6 +1540,65 @@ commands for a given test run are chained into a single SSH invocation.
   JS bundles contain the new "New Hams" UI text. Cleaned up all
   disposable pods/images used during verification afterward.
 
+- ✅ **User guide refresh + in-app Help page** — done. `docs/user-guide.md`
+  had gone stale since its original publish — it predated guided
+  (no-JSON) channel setup, the expanded email-to-SMS carrier list,
+  watch-by-FRN, channel test-send, "🔔 Watch this" detail-page
+  crosslinks, click-to-sort browse tables, field-definition tooltips +
+  the `/field-definitions` reference page, the expanded homepage copy,
+  and the "🎉 New Hams" celebration. Rewrote it end-to-end, written at
+  a level understandable to young/new readers, and added five new
+  sections (The home page, 🎉 New Hams, Sorting any table by column,
+  What do all these codes and abbreviations mean?, plus a restructured
+  My Watches with FRN/guided-setup/test-send/crosslink subsections)
+  and an expanded FAQ.
+
+  Then added an in-app **Help page** (`/help`, linked from the footer)
+  so this same guide is readable from inside the running app, not just
+  the repo. Rather than hand-duplicating the content into a second,
+  driftable copy inside `web/`, `web/Dockerfile`'s build stage now
+  copies `docs/user-guide.md` in directly as a static asset (served at
+  `/user-guide.md`) via a new Podman/Buildah **additional build
+  context** named `docs` — since `web`'s own build context is just the
+  `web/` directory and can't otherwise see `../docs`. `compose.yaml`
+  (`build.additional_contexts`) and `deploy/update.sh`'s `build_image`
+  helper (now accepts extra `--build-context` args, used only for the
+  `web` build) both wire this through, so both the Compose and
+  Quadlet/`update.sh` deploy paths stay in sync. `docs/user-guide.md`
+  is therefore the single source of truth for both the repo and the
+  in-app guide — no manual copy-paste to keep updated.
+
+  `web/src/routes/help/+page.svelte` fetches `/user-guide.md` at
+  runtime (client-rendered, matching this app's SPA architecture) and
+  renders it with the `marked` library (MIT-licensed, matching the
+  project's free/open-source-only integrations rule) plus the
+  `marked-gfm-heading-id` extension so the guide's own internal
+  "Contents" `#anchor` links keep working once rendered in-app. New
+  `.markdown-body` typography rules added to `app.css`, themed
+  entirely off the existing dark-mode CSS variables (headings, tables,
+  code blocks, blockquotes) — no new hardcoded colors. Footer link
+  "Help" added in `+layout.svelte`, next to Field Definitions/New Hams.
+
+  Tested per this project's established methodology: a disposable
+  `podman build --build-context docs=...` of `web/Dockerfile` on
+  `fcculs@10.64.3.39` (first on a throwaway clone of a WIP branch,
+  before merging to master) succeeded, and a throwaway container
+  booted from it confirmed `GET /user-guide.md` served the full
+  24,616-byte guide, `GET /help` returned 200, and the built JS bundle
+  contained both the `marked` library and the footer's `/help` link —
+  all before the WIP branch was merged to master, pushed, or deployed.
+  Deployed for real via `deploy/update.sh --force` (a first run
+  surfaced a real pre-existing gap in `update.sh`'s staleness-skip
+  check — it only inspects the `api` image's revision label as a
+  proxy for "already built this commit," so a genuinely failed `web`
+  build on an earlier interactive attempt was masked on the next
+  invocation; noted here for future awareness, not fixed as
+  out-of-scope for this task). Live-verified against production
+  afterward: `GET /`, `GET /help`, and `GET /user-guide.md` all return
+  200, the served guide is the full 24,616 bytes, and the running
+  `fcculs-web` container's `org.opencontainers.image.revision` label
+  matches the deployed commit.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

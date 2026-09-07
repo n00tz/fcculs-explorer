@@ -63,11 +63,19 @@ is tracked automatically by `.github/dependabot.yml`'s `docker` entries):
 `psycopg[binary]==3.3.*`, `rq==2.12.*`, `redis==8.*`, `httpx==0.28.*`,
 `pytest==9.*`
 
-**`web/package.json`** — SvelteKit frontend (build-time only; none of
-these ship in the runtime Caddy image, which serves only the static
-build output):
+**`web/package.json`** — SvelteKit frontend build tooling (build-time
+only; these compile the app but don't ship any code of their own into
+the runtime Caddy image, which serves only the compiled static build
+output):
 `@sveltejs/kit ^2.5.18`, `@sveltejs/adapter-static ^3.0.2`,
 `@sveltejs/vite-plugin-svelte ^7.3.0`, `svelte ^5.57.0`, `vite ^8.2.2`
+
+**`web/package.json`** — client-side runtime dependencies (these *do*
+ship, bundled into the compiled JS Caddy serves): `marked ^18.0.11`
+(renders `docs/user-guide.md` as HTML on the in-app `/help` page —
+see "Running with Podman Quadlets" below for how that file gets into
+the image) and `marked-gfm-heading-id ^4.1.4` (gives rendered headings
+real anchors so the guide's own Contents links work in-app).
 
 No other runtime dependencies (no CDN-loaded JS, no client-side analytics/
 tracking libraries, no paid third-party API SDKs) are used anywhere in the
@@ -191,7 +199,10 @@ enabled) with no extra tooling. Still single-host, still rootless.
   podman build -t localhost/fcculs-api:latest      ./api
   podman build -t localhost/fcculs-ingestor:latest ./ingestor
   podman build -t localhost/fcculs-notifier:latest ./notifier
-  podman build -t localhost/fcculs-web:latest      ./web
+  # web needs docs/user-guide.md (outside its own build dir) embedded as
+  # a static asset for the in-app /help page -- pass it in as an extra
+  # named build context (`deploy/update.sh` does this automatically):
+  podman build -t localhost/fcculs-web:latest --build-context docs=./docs ./web
   ```
 
   (Different image names/tags can be set via `API_IMAGE`,
@@ -243,6 +254,9 @@ For a one-off manual rebuild of a single service:
 
 ```bash
 podman build -t localhost/fcculs-api:latest ./api   # rebuild what changed
+# web is the one exception -- it needs the extra "docs" build context
+# (see above) to pick up docs/user-guide.md for the in-app /help page:
+# podman build -t localhost/fcculs-web:latest --build-context docs=./docs ./web
 systemctl --user restart fcculs-api.service         # restart just that unit
 ```
 
