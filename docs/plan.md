@@ -2477,7 +2477,7 @@ Two distinct problems:
    trap: a class with no class-body annotations yields no schema and
    falls back to `repr()` with no warning.
 
-### Todos (to be created when this moves from planning to implementation)
+### Todos (tracked in the SQL `todos` table, all `blocked` until this is greenlit)
 
 - `mcp-server-scaffold` — New service directory (name chosen to avoid
   the `mcp` import collision): `MCPServer` instance, config, non-root
