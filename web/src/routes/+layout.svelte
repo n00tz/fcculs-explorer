@@ -33,7 +33,8 @@
 	<footer>
 		<p>
 			Data sourced from the FCC Universal Licensing System (ULS) public files. Not affiliated
-			with the FCC. <a href="/field-definitions">Field Definitions</a> ·
+			with the FCC. <a href="/help">Help</a> ·
+			<a href="/field-definitions">Field Definitions</a> ·
 			<a href="/new-hams">New Hams</a>
 		</p>
 	</footer>

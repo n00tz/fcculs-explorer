@@ -116,8 +116,9 @@ fi
 
 echo "Building images from commit $AFTER_SHA ($SHORT_SHA)..."
 
-build_image() { # build_image <context-dir> <image-ref>
+build_image() { # build_image <context-dir> <image-ref> [extra "--build-context name=path" args...]
   local context="$1" image_ref="$2" repo
+  shift 2
   repo="$(img_repo "$image_ref")"
   echo "--- building $repo (context: $context) ---"
   podman build \
@@ -127,13 +128,17 @@ build_image() { # build_image <context-dir> <image-ref>
     --label "org.opencontainers.image.source=$(git config --get remote.origin.url 2>/dev/null || echo unknown)" \
     -t "${repo}:latest" \
     -t "${repo}:${SHORT_SHA}" \
+    "$@" \
     "$context"
 }
 
 build_image "$REPO_DIR/api"      "$API_IMAGE"
 build_image "$REPO_DIR/ingestor" "$INGESTOR_IMAGE"
 build_image "$REPO_DIR/notifier" "$NOTIFIER_IMAGE"
-build_image "$REPO_DIR/web"      "$WEB_IMAGE"
+# web needs docs/user-guide.md (outside its own build context) to embed as
+# a static asset for the in-app Help page -- see web/Dockerfile's
+# `COPY --from=docs` and compose.yaml's matching `additional_contexts`.
+build_image "$REPO_DIR/web"      "$WEB_IMAGE" --build-context "docs=$REPO_DIR/docs"
 
 echo ""
 echo "Built and tagged (per image): :latest, :$SHORT_SHA"

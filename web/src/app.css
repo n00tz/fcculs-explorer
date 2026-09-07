@@ -440,3 +440,79 @@ tr:hover td {
 	margin: 0.5rem 0 0;
 	font-size: 0.85rem;
 }
+
+/* Rendered docs/user-guide.md on the /help page (see help/+page.svelte).
+   Scoped to .markdown-body so generic h1/h2/table/etc. rules stay tuned
+   for the rest of the app instead of being loosened site-wide. */
+.markdown-body {
+	max-width: 780px;
+	margin: 0 auto;
+}
+.markdown-body h1 {
+	font-size: 1.7rem;
+}
+.markdown-body h2 {
+	border-bottom: 1px solid var(--border);
+	padding-bottom: 0.35rem;
+}
+.markdown-body h3 {
+	font-size: 1.05rem;
+	margin: 1.25rem 0 0.5rem;
+	color: var(--text);
+}
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol {
+	margin: 0 0 0.85rem;
+}
+.markdown-body ul,
+.markdown-body ol {
+	padding-left: 1.4rem;
+}
+.markdown-body li {
+	margin-bottom: 0.3rem;
+}
+.markdown-body a {
+	color: var(--accent);
+}
+.markdown-body code {
+	background: var(--surface-alt);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 0.05rem 0.35rem;
+	font-size: 0.88em;
+}
+.markdown-body pre {
+	background: var(--surface-alt);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 0.75rem 1rem;
+	overflow-x: auto;
+}
+.markdown-body pre code {
+	background: none;
+	border: none;
+	padding: 0;
+}
+.markdown-body blockquote {
+	background: var(--surface-alt);
+	border-left: 3px solid var(--accent);
+	margin: 1rem 0;
+	padding: 0.6rem 1rem;
+	border-radius: 4px;
+	color: var(--text-dim);
+}
+.markdown-body blockquote p:last-child {
+	margin-bottom: 0;
+}
+.markdown-body table {
+	display: block;
+	overflow-x: auto;
+	margin: 0 0 1rem;
+	white-space: nowrap;
+}
+.markdown-body hr {
+	border: none;
+	border-top: 1px solid var(--border);
+	margin: 1.5rem 0;
+}

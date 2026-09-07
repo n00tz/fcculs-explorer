@@ -9,6 +9,15 @@ COPY package.json .
 RUN npm install --no-audit --no-fund
 
 COPY . .
+
+# Copy the repo's docs/user-guide.md in as a static asset so the in-app
+# Help page (web/src/routes/help) can fetch and render the exact same
+# content as the repo docs -- one source of truth, no manual sync. Comes
+# from the "docs" additional build context (see compose.yaml /
+# deploy/update.sh's --build-context wiring), since the default build
+# context here is just web/ and can't see ../docs directly.
+COPY --from=docs user-guide.md ./static/user-guide.md
+
 RUN npm run build
 
 FROM docker.io/library/caddy:2-alpine

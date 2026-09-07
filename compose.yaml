@@ -134,7 +134,14 @@ services:
     command: ["/bin/sh", "-c", "while true; do python -m app.dispatch; sleep ${DISPATCH_INTERVAL_SECONDS:-60}; done"]
 
   web:
-    build: ./web
+    build:
+      context: ./web
+      # The web build stage copies docs/user-guide.md in as a static asset
+      # (served at /user-guide.md, rendered by the /help page) so the
+      # in-app Help page and the repo's docs/user-guide.md stay a single
+      # source of truth -- no content duplicated into the web/ tree.
+      additional_contexts:
+        docs: ./docs
     restart: unless-stopped
     depends_on:
       - api
