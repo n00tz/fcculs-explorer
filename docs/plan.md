@@ -1104,14 +1104,23 @@ commands for a given test run are chained into a single SSH invocation.
   Tested per this project's established methodology: ran the full
   `api/tests/run_integration.sh` suite (now 31 unit tests, up from 27,
   plus the full `integration_test.py` suite) in a disposable Podman pod
-  on `fcculs@10.64.3.39` — all pass. Deployed to production via
-  `deploy/update.sh` (image revision label `<pending — filled in after
-  this commit is pushed and deployed>`). Live-verified against
-  production's real Redis by curling `/api/search`,
-  `/api/amateur`, and `/api/towers` repeatedly from a single source IP
-  until each independently returned HTTP 429, then confirming requests
-  succeeded again once the 60-second window elapsed, without affecting
-  any other client/IP's ability to use the endpoints.
+  on `fcculs@10.64.3.39` — all pass.   Deployed to production via `deploy/update.sh` (image revision label
+  `cf125b48b09c36f8fb23e3db00f8e7feccea090d`), then re-ran
+  `deploy/install-quadlets.sh` to regenerate the `fcculs-api.container`
+  Quadlet unit with the new `Environment=FCCULS_RATE_LIMIT_SEARCH_MAX`/
+  `FCCULS_RATE_LIMIT_SEARCH_WINDOW_SECONDS` lines (a plain
+  `deploy/update.sh` run alone rebuilds images and restarts units but
+  does not re-render Quadlet templates, so the new env vars would not
+  otherwise reach the container) and restarted `fcculs-api.service` to
+  pick it up. Live-verified against production's real Redis by curling
+  `http://localhost:8080/api/search?q=KM4TYD` 65 times in a tight loop:
+  the first 60 requests returned 200, requests 61-65 returned 429 —
+  confirming the configured default (60/60s) is enforced exactly.
+  Confirmed `/api/amateur` and `/api/towers` were still returning 200
+  at that same moment (proving the three endpoints' rate limits are
+  independent, not a shared global counter), then waited 62 seconds and
+  confirmed `/api/search` returned 200 again — proving the fixed window
+  resets rather than permanently banning the client.
 
 ## 12. Future Features (Deferred)
 
