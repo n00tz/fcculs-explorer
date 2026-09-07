@@ -2147,6 +2147,16 @@ convention is the `FCCULS_` env-var *prefix*, but `api` uses
 `pydantic-settings` while `notifier` uses a plain dataclass over
 `os.environ`.
 
+Checking the stack also surfaced two directory-scoped mechanisms that
+would silently skip a fifth service. `.github/dependabot.yml` has no
+recursion — it lists an explicit entry per directory per ecosystem, so
+a new service needs two new entries or its dependencies and base image
+simply never get bumped, with nothing to signal the omission. And the
+SBOM in `README.md` is hand-maintained by design, duplicating every
+service's manifest in one place for auditors. Both now have a
+`mcp-repo-hygiene` todo; neither is something to discover after the
+service has been running unpatched for months.
+
 One claim was worth chasing down to the source because a plain reading
 of it was **wrong in both directions**. `TransportSecurityMiddleware`'s
 own default is DNS-rebinding protection *disabled* — but the app factory
@@ -2417,6 +2427,24 @@ wants the old `FastMCP` API must pin `mcp<2`.
 > Decide this **before** scaffolding, not after debugging an import
 > error.
 
+### Repo-hygiene wiring a new service directory requires
+
+Adding a fifth service directory isn't just a Dockerfile — two existing
+mechanisms are directory-scoped and will silently skip it otherwise:
+
+- **`.github/dependabot.yml` does not recurse.** It carries an explicit
+  entry per directory *per ecosystem* — currently four `pip`-or-`npm`
+  entries and four `docker` entries for `/api`, `/notifier`,
+  `/ingestor`, `/web` (the file's own comments call out that neither
+  the `pip` nor the `docker` ecosystem recurses). A new service needs
+  **two** new entries, or its `requirements.txt` and base image will
+  never be bumped and the gap won't announce itself.
+- **The SBOM in `README.md` is hand-maintained.** It deliberately
+  duplicates every service's dependency manifest in one place so an
+  auditor doesn't have to open each file, and its own instructions say
+  to update it whenever a `requirements.txt` or base-image tag changes.
+  A new service adds a new section there.
+
 ### Deployment wiring — verified gotchas
 
 - New `quadlet/fcculs-mcp.container`, modeled on
@@ -2564,6 +2592,10 @@ Two distinct problems:
   `install-quadlets.sh` wiring, Caddy routes for both `/mcp` and
   `/mcp/`, `--proxy-headers`, and an explicit documented
   `transport_security` decision.
+- `mcp-repo-hygiene` — Add the two `.github/dependabot.yml` entries
+  (`pip` + `docker`) the new service directory needs, since neither
+  ecosystem recurses, and add its section to the hand-maintained SBOM
+  in `README.md`.
 - `mcp-tests` — Mocked unit tests plus a real `run_integration.sh`
   exercising every tool against a live `api` + Postgres.
 - `mcp-docs` — README section on pointing an MCP client at the server,
