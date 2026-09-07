@@ -60,9 +60,9 @@
 
 <h1>🎉 New Hams</h1>
 <p class="muted">
-	Every amateur radio operator and club station granted their very first callsign, as reported
-	in the FCC's daily ULS updates. This list only shows first-ever grants — not renewals, vanity
-	changes, or additional callsigns for an already-licensed operator.
+	Every amateur radio operator and club station granted their very first callsign in the last
+	10 days, as reported in the FCC's daily ULS updates. This list only shows first-ever grants —
+	not renewals, vanity changes, or additional callsigns for an already-licensed operator.
 </p>
 
 <div class="filters">
@@ -78,6 +78,7 @@
 <p class="muted">
 	<strong>{totalIndividuals}</strong> new amateur radio operators licensed ·
 	<strong>{totalClubs}</strong> new club stations
+	<span class="muted">(last 10 days)</span>
 </p>
 
 <table>

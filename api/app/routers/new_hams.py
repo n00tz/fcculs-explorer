@@ -1,7 +1,12 @@
 """Public read endpoint celebrating brand-new amateur radio grants: people
 (and clubs) who have never held a callsign before, per change_events'
 durable is_new_operator flag (see db/006_new_operator_celebration.sql and
-ingestor/db.py's frn_has_prior_amateur_license())."""
+ingestor/db.py's frn_has_prior_amateur_license()).
+
+Scoped to a rolling NEW_HAMS_WINDOW_DAYS window and ordered by date then
+callsign, so a missing day of FCC ingestion shows up as a visible gap in
+the dates rather than being hidden by more recent grants backfilling the
+page (see docs/plan.md's daily-ingest catch-up redesign)."""
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg import AsyncConnection
 from pydantic import BaseModel
@@ -11,6 +16,13 @@ from ..db import get_db
 from ..ratelimit import enforce_rate_limit
 
 router = APIRouter(prefix="/api/new-hams", tags=["new-hams"])
+
+# How far back the celebration looks. Deliberately a little longer than a
+# week so that a gap in daily ingestion (FCC only keeps a rolling 7 weekday
+# files, so a missed day is unrecoverable once rotated) is visible at a
+# glance as a missing date in the listing, rather than silently scrolling
+# away behind whatever the most recent N grants happen to be.
+NEW_HAMS_WINDOW_DAYS = 10
 
 # Validated against an allow-list (never interpolated raw) -- same
 # SQL-injection-safety pattern used for sort/order elsewhere in this project.
@@ -27,6 +39,7 @@ class NewHamsPage(BaseModel):
     total: int
     total_individuals: int
     total_clubs: int
+    window_days: int = NEW_HAMS_WINDOW_DAYS
 
 
 @router.get("", response_model=NewHamsPage)
@@ -63,8 +76,10 @@ async def new_hams(
             FROM change_events ce
             JOIN amat_en en ON en.unique_system_identifier = ce.uls_system_id::bigint
             WHERE ce.is_new_operator
+              AND ce.effective_date >= current_date - %(window_days)s::int
               AND en.applicant_type_code IN ('I', 'B')
-            """
+            """,
+            {"window_days": NEW_HAMS_WINDOW_DAYS},
         )
         counts = await cur.fetchone()
         total_individuals = counts["total_individuals"]
@@ -86,12 +101,13 @@ async def new_hams(
             JOIN amat_en en ON en.unique_system_identifier = ce.uls_system_id::bigint
             LEFT JOIN amat_hd hd ON hd.unique_system_identifier = en.unique_system_identifier
             WHERE ce.is_new_operator
+              AND ce.effective_date >= current_date - %(window_days)s::int
               AND en.applicant_type_code IN ('I', 'B')
               {type_condition}
-            ORDER BY ce.effective_date DESC, ce.detected_at DESC
+            ORDER BY ce.effective_date DESC, hd.call_sign ASC
             LIMIT %(limit)s OFFSET %(offset)s
             """,
-            {"limit": page_size, "offset": offset},
+            {"limit": page_size, "offset": offset, "window_days": NEW_HAMS_WINDOW_DAYS},
         )
         items = await cur.fetchall()
 

@@ -128,3 +128,70 @@ def frn_has_prior_amateur_license(conn: psycopg.Connection, frn: str) -> bool:
     with conn.cursor() as cur:
         cur.execute("SELECT EXISTS(SELECT 1 FROM amat_en WHERE frn = %s)", (frn,))
         return bool(cur.fetchone()[0])
+
+
+def already_ingested(conn: psycopg.Connection, service: str, data_date: date) -> bool:
+    """True if this service's transactions for this real calendar date have
+    already been successfully ingested (see db/007_ingest_run_tracking.sql).
+
+    This is the dedupe gate that makes catch-up runs safe to invoke as often
+    as desired: FCC's weekday-named daily files rotate in place, so without
+    tracking the real data date, a re-run would happily re-ingest whatever
+    that weekday's file currently holds.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT EXISTS(SELECT 1 FROM ingest_runs WHERE service = %s AND data_date = %s AND status = 'success')",
+            (service, data_date),
+        )
+        return bool(cur.fetchone()[0])
+
+
+def ingested_data_dates(conn: psycopg.Connection, service: str, since: date) -> set:
+    """All successfully-ingested data dates for a service on/after `since`.
+    Fetched in one query so a catch-up pass doesn't issue a round trip per
+    candidate day."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT data_date FROM ingest_runs WHERE service = %s AND data_date >= %s AND status = 'success'",
+            (service, since),
+        )
+        return {r[0] for r in cur.fetchall()}
+
+
+def record_ingest_run(
+    conn: psycopg.Connection,
+    service: str,
+    day_of_week: str,
+    data_date: date,
+    source_file: str,
+    last_modified=None,
+    content_sha256: Optional[str] = None,
+    rows_ingested: int = 0,
+    changes_recorded: int = 0,
+    status: str = "success",
+) -> None:
+    """Record that a service's daily file for a real calendar date was
+    ingested. Upserts on (service, data_date) so a re-run refreshes the
+    bookkeeping rather than raising on the unique constraint."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ingest_runs
+                (service, day_of_week, data_date, source_file, last_modified,
+                 content_sha256, rows_ingested, changes_recorded, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (service, data_date) DO UPDATE SET
+                day_of_week = EXCLUDED.day_of_week,
+                source_file = EXCLUDED.source_file,
+                last_modified = EXCLUDED.last_modified,
+                content_sha256 = EXCLUDED.content_sha256,
+                rows_ingested = EXCLUDED.rows_ingested,
+                changes_recorded = EXCLUDED.changes_recorded,
+                status = EXCLUDED.status,
+                ingested_at = now()
+            """,
+            (service, day_of_week, data_date, source_file, last_modified,
+             content_sha256, rows_ingested, changes_recorded, status),
+        )
+    conn.commit()

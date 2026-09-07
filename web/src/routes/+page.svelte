@@ -156,11 +156,12 @@
 	{:else if newHamsError}
 		<p class="error">{newHamsError}</p>
 	{:else if newHamsTotal === 0}
-		<p class="muted">No new grants yet — check back after the next daily FCC update.</p>
+		<p class="muted">No new grants in the last 10 days — check back after the next daily FCC update.</p>
 	{:else}
 		<p class="new-hams-summary">
 			<strong>{newHamsTotalIndividuals}</strong> new amateur radio operators licensed ·
 			<strong>{newHamsTotalClubs}</strong> new club stations
+			<span class="muted">in the last 10 days</span>
 		</p>
 		<table class="new-hams-table">
 			<thead>
