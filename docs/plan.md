@@ -2040,6 +2040,62 @@ the truncate/pad-and-warn behaviour in `parser.py`, and the
 change; `architecture.md` is not baked into any image, so unlike
 `user-guide.md` this needs no redeploy.
 
+### Progress Log — unambiguous pagination counters
+
+Reported as a nitpick; it was a real readability bug on every paginated
+view. The pager rendered `Page {page} · {total} total`, which on
+`/amateur` came out literally as **`Page 1 · 1441106 total`**. Two
+separate defects: the two numbers look like a pair but aren't (the
+second is the record count, not the page count), and **total pages was
+computed nowhere in the codebase** — the one number a reader most
+expects was simply absent. Counts were also printed raw; nothing in
+`web/src` called `toLocaleString`.
+
+Now: `Page 1 of 67,806 · showing 1–25 of 1,695,148`.
+
+The same markup was copy-pasted **seven times** (amateur, towers,
+`ServiceBrowse` → gmrs/aircraft/ship, new-hams, the homepage widget, and
+admin's two), each with its own duplicated `page * pageSize >= total`
+disable condition. Extracted `web/src/lib/Pagination.svelte`, which owns
+that boundary once instead of seven times. The homepage widget passes
+`compact` to drop the word "showing" and protect the above-the-fold
+constraint it was built around.
+
+Two edge cases the format forced into the open. The chosen wording
+degenerates to the nonsense "Page 1 of 0 · showing 0–0 of 0" when
+nothing matches, so `total === 0` renders **No results** with both
+buttons disabled. More interestingly, `total` is 0 until the first fetch
+resolves and these pages set `loading = true` only *inside* `load()`,
+which runs from `onMount` — i.e. after first paint. So a naive
+implementation flashes "No results" on every page load. The initial
+`loading` value is now `true` in all five affected components (which
+also makes the pre-existing "Loading…" indicator appear immediately,
+and incidentally fixes the same latent flash in the homepage widget's
+"No new grants" branch).
+
+Number formatting lives in a shared `lib/format.js` and **pins `en-US`**
+rather than calling bare `toLocaleString()`: `web` builds with
+`adapter-static`, so markup is prerendered under Node and hydrated in
+the browser, and an unpinned locale can format differently in those two
+environments.
+
+Verified by **server-rendering the compiled component** against real
+totals rather than eyeballing the template — last-page partial ranges
+(`Page 57,645 of 57,645 · showing 1,441,101–1,441,106 of 1,441,106`),
+single-short-page, both empty states, and both compact cases, each with
+the correct buttons disabled. Then a real `vite build` in a disposable
+container before deploying, and live verification across all five browse
+services plus a deliberate zero-match filter.
+
+One deployment note worth recording: the `deploy/update.sh` run outlived
+an SSH disconnect (`client_loop: send disconnect`). The build had already
+completed, but the restart loop was still mid-flight, leaving `fcculs-web`
+running the previous image while `:latest` had already moved. Comparing
+`podman inspect fcculs-web --format '{{.Image}}'` against the `:latest`
+image ID is the quick way to detect that drift; the script finished on
+its own and the IDs matched afterwards. Re-running `update.sh` in that
+window would have reported "Already up to date" and skipped the restart,
+since all four images legitimately carried the current revision label.
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
