@@ -76,7 +76,8 @@ the site can do, even before you search for anything:
 Right on the home page, just under the search box, there's a small
 celebration list called **🎉 New Hams**. This shows real people (and
 clubs) who were **just granted their very first amateur radio license**
-— in other words, brand-new hams who have never held a callsign before.
+— in other words, brand-new hams who have never held a callsign before,
+from **the last 10 days**.
 
 At the top of the list you'll see two numbers, like:
 
@@ -95,6 +96,12 @@ Below the summary is a small table showing, for each new grant:
   tell them apart at a glance.
 - **City/State** — where they're located.
 - **Grant Date** — the day the FCC granted the license.
+
+The table is sorted newest first by **Grant Date**, and then
+alphabetically by **Callsign** within each day. Because it always covers
+a full 10-day stretch, you can also use it as a quick health check: if a
+date in that range has no entries at all, that's usually a hint the site
+missed a day of FCC data (an operator can fix that — see `README.md`).
 
 The home page only shows 12 at a time (so the page stays a comfortable
 size on a computer screen), with **Previous**/**Next** buttons if you
@@ -116,7 +123,8 @@ already hams.
 **When does this update?** Automatically, every day, right after the
 site pulls in the FCC's daily update. There's nothing you need to do —
 just check back and the list (and the counts at the top) will reflect
-whatever's new.
+whatever's new. Names drop off the list once their grant is more than
+10 days old.
 
 ## Searching
 
@@ -443,7 +451,8 @@ list?**
 Yes, automatically, as long as this is genuinely the very first amateur
 license the FCC has ever recorded for your FRN — no action needed on
 your part. It'll appear the day after the FCC's daily file that includes
-your grant is processed by this site.
+your grant is processed by this site, and it stays on the list for 10
+days.
 
 **I created a watch but haven't gotten an alert — is something wrong?**
 First, try the **Send test** button on that channel to confirm it's

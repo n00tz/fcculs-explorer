@@ -156,15 +156,68 @@ that publishes a host port, default `8080`, see `PUBLISHED_PORT` in
 
 The `ingestor`'s default command runs the daily-cron scheduler, which
 assumes tables are already populated. For a brand-new database, run a
-one-off bootstrap load of the complete weekly dumps first:
+one-off bootstrap load of the complete weekly dumps first, then
+immediately catch up on every daily increment published since that
+dump was cut:
 
 ```bash
 podman compose run --rm ingestor python scheduler.py --bootstrap
+podman compose run --rm ingestor python scheduler.py --catch-up
 ```
 
-After that completes, the regular `ingestor` service's daily cron
-(`INGEST_CRON_HOUR`/`INGEST_CRON_MINUTE` in `.env`, default 07:00 UTC) keeps
-data current via the daily transaction files.
+**Both steps are required.** The complete weekly dump is only cut once
+a week, so on any day but publication day it is already 1–6 days stale.
+The `--catch-up` run closes that gap; skipping it leaves a brand-new
+instance silently missing up to a week of grants (and an empty "New
+Hams" feed).
+
+After that, the regular `ingestor` service's daily cron
+(`INGEST_CRON_HOUR`/`INGEST_CRON_MINUTE` in `.env`, default 13:30 UTC)
+keeps data current via the daily transaction files.
+
+### How the daily transaction files work
+
+This trips up every new instance, so it is worth stating plainly:
+
+- FCC daily files are named **by weekday only** (`l_am_mon.zip`,
+  `r_tow_tue.zip`, …) and are **overwritten in place every week**.
+  There is no date in the filename and no archive of older days — only
+  a rolling 7-day window is ever available.
+- A given weekday's file contains that weekday's transactions but is
+  **published around 05:00–13:00 UTC the *following* day**. So on a
+  Monday, `l_am_mon.zip` still holds *last* Monday's data until the
+  new one lands early Tuesday.
+
+The scheduler therefore never guesses a filename from the current
+weekday. It issues an HTTP `HEAD` against all seven files, reads each
+one's `Last-Modified` header, resolves the real data date behind it,
+and ingests only the days not already recorded in the `ingest_runs`
+table — oldest first, so multi-day catch-ups apply in chronological
+order.
+
+To see exactly what FCC currently offers versus what has been ingested:
+
+```bash
+podman compose run --rm ingestor python scheduler.py --status
+```
+
+```
+amateur:
+  2026-08-31 (mon) published 2026-09-01 12:00 UTC  [ingested]
+  2026-09-01 (tue) published 2026-09-02 12:00 UTC  [MISSING]
+  ...
+```
+
+`--catch-up` (alias: `--run-once`) ingests everything marked
+`[MISSING]`. It is **safe to re-run at any time**: the `ingest_runs`
+table has a `UNIQUE (service, data_date)` constraint, so an
+already-ingested day is skipped without even downloading the file, and
+row-level upserts mean a forced re-ingest never duplicates data.
+
+> **If the stack is down for more than 7 days**, the missed days have
+> already been overwritten upstream and cannot be recovered from the
+> daily files. Re-run `--bootstrap` (which reloads the current complete
+> dump) followed by `--catch-up`.
 
 ### Verifying the stack
 
@@ -246,6 +299,17 @@ auto-started). On a fresh database:
 ```bash
 systemctl --user start fcculs-bootstrap.service
 journalctl --user -u fcculs-bootstrap.service -f   # watch progress
+```
+
+Once it finishes, catch up on the daily increments published since the
+complete dump was cut (see
+[How the daily transaction files work](#how-the-daily-transaction-files-work)
+— the weekly dump is up to 6 days stale on arrival, so this step is not
+optional):
+
+```bash
+podman exec ingestor python scheduler.py --status     # what's missing
+podman exec ingestor python scheduler.py --catch-up   # ingest it
 ```
 
 ### Updating after a rebuild
@@ -365,7 +429,7 @@ just re-run `deploy/install-quadlets.sh`.
 | `CORS_ALLOW_ORIGINS` | api | Comma-separated list of origins allowed to make credentialed (cookie-carrying) cross-origin requests to the API. **Must be the real public hostname(s) users reach the app at** (e.g. your Cloudflare Tunnel domain) — never a wildcard, since browsers respond to a wildcard + credentials combination by letting *any* site ride a signed-in user's or admin's session cookie. Change any time by editing `.env` and restarting the `api` service (`podman compose restart api`, or `systemctl --user restart fcculs-api` under Quadlets) — no image rebuild required. Multiple origins: `CORS_ALLOW_ORIGINS=https://a.example,https://b.example` |
 | `RATE_LIMIT_SEARCH_MAX`, `RATE_LIMIT_SEARCH_WINDOW_SECONDS` | api | Per-client-IP rate limit (default 60 requests/60 seconds) applied to the unauthenticated `/api/search`, `/api/amateur` browse, and `/api/towers` browse endpoints — the app's easiest DoS/cost-abuse surface once exposed to the internet, since they run trigram/filter queries against multi-million-row tables. Change any time by editing `.env` and restarting the `api` service — no rebuild required |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_FROM_ADDRESS` | api, notifier | Outbound SMTP relay for magic-links and email/email-to-SMS alerts |
-| `INGEST_CRON_HOUR`, `INGEST_CRON_MINUTE` | ingestor | UTC time of the daily ingest job |
+| `INGEST_CRON_HOUR`, `INGEST_CRON_MINUTE` | ingestor | UTC time of the daily ingest job (default 13:30, chosen to sit after FCC's ~05:00–13:00 UTC daily-file publication window) |
 | `MAX_DELIVERY_ATTEMPTS` | notifier | Retry cap per notification delivery |
 | `DISPATCH_INTERVAL_SECONDS` | notifier-dispatch | Polling interval for matching new `change_events` to watches |
 | `BACKUP_DIR` | deploy/backup.sh, fcculs-backup.timer | Host directory daily `pg_dump` backups are written to (default `~/fcculs-backups`); override per-run with `FCCULS_BACKUP_DIR` |

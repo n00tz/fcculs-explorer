@@ -3,8 +3,10 @@
 durable is_new_operator flag (see db/006_new_operator_celebration.sql and
 ingestor/db.py's frn_has_prior_amateur_license()).
 
-Scoped to a rolling NEW_HAMS_WINDOW_DAYS window and ordered by date then
-callsign, so a missing day of FCC ingestion shows up as a visible gap in
+Scoped to a rolling NEW_HAMS_WINDOW_DAYS window (on the ingest effective
+date, so ingestion gaps are visible) and ordered by grant date then
+callsign -- grant date is the column the UI actually displays, so a
+missing day of FCC ingestion shows up as a visible gap in
 the dates rather than being hidden by more recent grants backfilling the
 page (see docs/plan.md's daily-ingest catch-up redesign)."""
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -104,7 +106,7 @@ async def new_hams(
               AND ce.effective_date >= current_date - %(window_days)s::int
               AND en.applicant_type_code IN ('I', 'B')
               {type_condition}
-            ORDER BY ce.effective_date DESC, hd.call_sign ASC
+            ORDER BY hd.grant_date DESC NULLS LAST, hd.call_sign ASC
             LIMIT %(limit)s OFFSET %(offset)s
             """,
             {"limit": page_size, "offset": offset, "window_days": NEW_HAMS_WINDOW_DAYS},

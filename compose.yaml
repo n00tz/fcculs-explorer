@@ -91,8 +91,8 @@ services:
         condition: service_completed_successfully
     environment:
       FCCULS_DATABASE_URL: postgresql://${POSTGRES_USER:-fcculs}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fcculs}
-      FCCULS_INGEST_CRON_HOUR: ${INGEST_CRON_HOUR:-7}
-      FCCULS_INGEST_CRON_MINUTE: ${INGEST_CRON_MINUTE:-0}
+      FCCULS_INGEST_CRON_HOUR: ${INGEST_CRON_HOUR:-13}
+      FCCULS_INGEST_CRON_MINUTE: ${INGEST_CRON_MINUTE:-30}
     # Default CMD (see Dockerfile) runs the APScheduler daily-cron process.
     # For the very first deployment, run a one-off bootstrap load instead:
     #   podman compose run --rm ingestor python scheduler.py --bootstrap

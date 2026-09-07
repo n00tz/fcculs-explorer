@@ -1638,6 +1638,94 @@ commands for a given test run are chained into a single SSH invocation.
   `master` and deployed via `deploy/update.sh --force` on production
   afterward with no incident.
 
+### Daily ingestor catch-up redesign + 10-day New Hams window
+
+- **Symptom reported by the user**: the daily job run on 2026-09-07
+  imported *week-old* data, and the Amateur Radio Licenses table's most
+  recent grants were stuck at 2026-08-31 despite several days of
+  apparently-successful daily runs.
+- **Root cause (confirmed against live FCC `Last-Modified` headers)**:
+  FCC daily transaction files are named **by weekday only**
+  (`l_am_mon.zip`, `r_tow_tue.zip`, …) and are **overwritten in place
+  on a 7-day rotation** — there is no date in the filename and no
+  upstream archive. Critically, a given weekday's file is published
+  **~05:00–13:00 UTC the *following* day**. The old scheduler did
+  `DAYS_OF_WEEK[run_date.weekday()]` at 07:00 UTC, i.e. it fetched
+  "today's" filename *before* today's file had been published — which
+  still contained the **same weekday from the previous week**. Verified
+  empirically: on Mon 2026-09-07, `l_am_mon.zip` carried
+  `Last-Modified: Tue, 01 Sep 2026 12:00:09 GMT` → 2026-08-31 data.
+  This also meant every day published *between* runs was silently
+  skipped forever, producing the reported gaps.
+- **Redesign** (`ingestor/scheduler.py`, `downloader.py`, `db.py`):
+  the scheduler no longer guesses a filename from the calendar. It
+  `HEAD`s all seven weekday files, reads each `Last-Modified`, and
+  resolves the real data date by walking backward to the first matching
+  weekday (robust to late/holiday publication, unlike a naive
+  "publish date − 1 day"). It then ingests only the days not already
+  present in a new `ingest_runs` table, **oldest first**, each in its
+  own temp dir so a mid-catch-up failure still keeps earlier days
+  recorded. `effective_date` is now stamped with the file's **real data
+  date** rather than the run date — the actual source of the
+  wrong-dated change events.
+- **Dedupe** (`db/007_ingest_run_tracking.sql`): new `ingest_runs`
+  table keyed `UNIQUE (service, data_date)`, recording source file,
+  `Last-Modified`, a content SHA-256, row/change counts, and status.
+  An already-ingested day is skipped **without downloading**; row-level
+  upserts mean even a forced re-ingest cannot duplicate data.
+- **Cron moved 07:00 → 13:30 UTC** (`.env.example`, `compose.yaml`,
+  `install-quadlets.sh`, scheduler defaults) to sit after FCC's
+  publication window. Note the redesign makes this a latency
+  optimization, not a correctness requirement — catch-up is
+  self-healing regardless of run time.
+- **New CLI**: `--status` (prints FCC-available vs. ingested days with
+  `[ingested]`/`[MISSING]` marks), `--catch-up` (alias `--run-once`),
+  `--max-days`.
+- **New Hams**: window widened to 10 days (`NEW_HAMS_WINDOW_DAYS`) so
+  ingestion gaps are visible at a glance rather than hidden. Sort is
+  `grant_date DESC, call_sign ASC` — deliberately on **grant date**,
+  the column the UI actually displays, since sorting on the invisible
+  `effective_date` made the table look unsorted (verified against real
+  data: grant_date tracks effective_date for 324 of 326 rows).
+  `db/007` adds a matching partial index; the `db/006` index no longer
+  matched the new sort.
+- **Verification on production (`fcculs@10.64.3.39`)**, per this
+  project's methodology:
+  - 14 new scheduler unit tests (real observed FCC headers as fixtures,
+    late-publication, catch-up skip/ordering, effective-date
+    correctness, non-fatal missing archive members) — all pass; full
+    mocked ingestor suite 28/28 in a disposable `python:3.14-slim`
+    container.
+  - `--status` against the live DB correctly listed all 14
+    service/day combos as `[MISSING]`.
+  - Deleted the 2,915 mis-stamped `change_events` from the three buggy
+    runs (0 `notification_deliveries` referenced them; bootstrap
+    generates none, so all existing rows were from the bug), then ran
+    a real `--catch-up`: **all 7 days × 2 services ingested**
+    (2026-08-31 → 2026-09-06), 18,068 amateur + 1,373 tower rows,
+    8,964 + 6,518 change events. `amat_hd` max `grant_date` advanced
+    2026-08-31 → **2026-09-05**, and `change_events` now spread
+    correctly across real dates with 326 new operators (322
+    individuals, 4 clubs).
+  - **Dedupe proven for real**: an immediate second `--catch-up`
+    reported `nothing to do -- all 7 available day(s) already
+    ingested` for both services, downloaded nothing, and skipped the
+    materialized-view refresh.
+  - Empty weekend archives (FCC publishes a ~212-byte stub zip with no
+    `.dat` members when there's no business day) are handled
+    non-fatally **and still recorded**, so they aren't retried forever.
+  - Live `GET /api/new-hams` returned `window_days: 10`, `total: 326`,
+    `total_individuals: 322`, `total_clubs: 4`, correctly ordered.
+- **Documentation**: README gained a "How the daily transaction files
+  work" section (weekday rotation, D+1 publication, `--status`/
+  `--catch-up`, and an explicit warning that a >7-day outage requires a
+  fresh `--bootstrap` since the missed days are gone upstream), and the
+  first-time-load instructions in both the Compose and Quadlet paths
+  now state that `--bootstrap` **must** be followed by `--catch-up`
+  (the weekly dump is up to 6 days stale on arrival — the single most
+  likely way a new instance silently starts with a data gap).
+  `docs/user-guide.md` updated for the 10-day window and sort order.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
