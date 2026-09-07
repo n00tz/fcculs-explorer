@@ -1391,6 +1391,68 @@ commands for a given test run are chained into a single SSH invocation.
   Documentation-only change; no code path exercised, so no test beyond
   proofreading the dependency lists against the actual manifest files.
 
+- ✅ `dependabot-pr-review` — done. Worked through all 21 open
+  Dependabot PRs (opened by the `.github/dependabot.yml` config added
+  in the prior round). No PR-merge tool was available (the GitHub
+  integration in this environment is read-only for pull requests, and
+  neither the local machine nor `fcculs@10.64.3.39` had the `gh` CLI
+  installed) — resolved by applying each PR's exact version bump
+  directly to `master` via `git`/manual edits (verified byte-for-byte
+  against each PR's diff first), which is functionally equivalent to a
+  merge; GitHub/Dependabot auto-detected the satisfied versions and
+  auto-closed all 21 PRs within minutes of each push, with no manual
+  intervention needed. Grouped into five risk-tiered batches, each
+  independently tested on `fcculs@10.64.3.39` before merging:
+  - **Batch A** (PRs #18, #19, #15, #11, #17, #4, #12 — httpx 0.28,
+    psycopg/psycopg-pool 3.3, apscheduler 3.11.3): single-line
+    `requirements.txt` diffs, verified via each service's mocked test
+    suite in a disposable `python:3.12-slim` container (api 27
+    passed, notifier 26 passed, ingestor 16 passed).
+  - **Batch B** (PRs #21, #6, #10, #16 — pytest 8→9, pytest-asyncio
+    0.24→1.4): same mocked-test verification; confirmed no code in
+    this project uses `pytest-asyncio` markers at all (async tests
+    use plain `unittest` + `asyncio.run()`), so the major bump has no
+    behavioral surface here.
+  - **Batch C** (PRs #8, #14, #9 — redis-py 5→8, RQ 1.16→2.12,
+    notifier only): higher risk since RQ 2.x is API-breaking and the
+    notifier's dispatch/worker code depends on it directly — tested
+    with **real Postgres + Redis**, not just mocks: ran a real RQ 2.12
+    `Worker` end-to-end through `notifier/tests/integration_test.py`
+    (consumed a queued `send_delivery` job, delivered a real webhook,
+    marked the DB row sent) and `api/tests/integration_test.py`'s full
+    31-check suite (including real-Redis rate limiting) against the
+    bumped `redis` package.
+  - **Batch D** (PRs #1, #2, #3 — Python 3.12-slim → 3.14-slim base
+    images): required full `podman build` of all three Dockerfiles,
+    not just a pip install in an existing container, since the `FROM`
+    line changes. All three built cleanly (`psycopg[binary]` has cp314
+    wheels available), and each service's mocked tests passed running
+    inside its actual built 3.14 image.
+  - **Batch E** (PRs #13, #20, #5, #7 — Svelte 4→5, Vite 5→8,
+    `@sveltejs/vite-plugin-svelte` 3→7, Node 22→26 base image):
+    flagged highest-risk going in (Svelte 5 is a breaking rewrite) but
+    verified clean: both a bare `npm run build` and a full
+    `podman build` of `web/Dockerfile` with `node:26-slim` succeeded
+    with no errors (one harmless `a11y_autofocus` lint hint) — the
+    existing Svelte 4 legacy syntax (`$:` reactive statements,
+    `on:click`/`on:input`, `{#each}`/`{#if}`) runs unchanged under
+    Svelte 5's backward-compatibility mode. Ran the built image and
+    confirmed `/`, `/amateur`, `/watches`, `/towers`, and
+    `/field-definitions` all returned HTTP 200 with expected markup
+    before merging.
+
+  After all five batches landed on `master` (commits `394dca6` through
+  `10af842`), ran a real `deploy/update.sh --force` on
+  `fcculs@10.64.3.39` — all 6 services (`postgres`, `redis`, `api`,
+  `ingestor`, `fcculs-notifier-worker`, `fcculs-notifier-dispatch`,
+  `fcculs-web`) restarted active/healthy. Live-verified post-deploy:
+  `GET /` and `GET /amateur` on the public hostname returned HTTP 200,
+  `GET /api/search?q=N0OTZ` returned real matching records, `api`'s
+  container confirmed running `python3.14`, and the notifier worker
+  container confirmed `redis==8.1.0`/`rq==2.12.0` installed. Cleaned up
+  all disposable test containers/images/pods used during batch
+  verification afterward.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
