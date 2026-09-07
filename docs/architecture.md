@@ -14,15 +14,16 @@ sync with the source. Edit the code blocks directly.
 - [1. System topology](#1-system-topology) — containers, networks, volumes
 - [2. Level-0 data flow](#2-level-0-data-flow) — FCC to end user
 - [3. Ingestion: daily catch-up logic](#3-ingestion-daily-catch-up-logic)
-- [4. Ingestion: per-row decision logic](#4-ingestion-per-row-decision-logic)
-- [5. Notification pipeline](#5-notification-pipeline)
-- [6. Delivery lifecycle](#6-delivery-lifecycle) — retry/failure states
-- [7. Passwordless authentication](#7-passwordless-authentication)
-- [8. Test-send](#8-test-send)
-- [9. Read-request lifecycle](#9-read-request-lifecycle)
-- [10. Data model](#10-data-model)
-- [11. Deployment: update.sh](#11-deployment-updatesh)
-- [12. Operational runbook](#12-operational-runbook) — install & recovery
+- [4. Parsing: file to record](#4-parsing-file-to-record) — FCC's three delimiter hazards
+- [5. Ingestion: per-row decision logic](#5-ingestion-per-row-decision-logic)
+- [6. Notification pipeline](#6-notification-pipeline)
+- [7. Delivery lifecycle](#7-delivery-lifecycle) — retry/failure states
+- [8. Passwordless authentication](#8-passwordless-authentication)
+- [9. Test-send](#9-test-send)
+- [10. Read-request lifecycle](#10-read-request-lifecycle)
+- [11. Data model](#11-data-model)
+- [12. Deployment: update.sh](#12-deployment-updatesh)
+- [13. Operational runbook](#13-operational-runbook) — install & recovery
 
 ---
 
@@ -138,6 +139,11 @@ flowchart LR
 "Change History" on detail pages **and** the trigger source for all
 alerting. Nothing else feeds alerts.
 
+The `parse` and `diff` boxes above are each expanded in detail below:
+[§4](#4-parsing-file-to-record) covers turning a `.dat` file into records,
+and [§5](#5-ingestion-per-row-decision-logic) covers what happens to each
+record once parsed.
+
 ---
 
 ## 3. Ingestion: daily catch-up logic
@@ -200,11 +206,61 @@ flowchart TD
 
 > **Hard limit:** FCC keeps only 7 rotating files. A gap longer than that
 > is **unrecoverable from the daily feed** — it needs a fresh
-> `--bootstrap`. See [§12](#12-operational-runbook).
+> `--bootstrap`. See [§13](#13-operational-runbook).
 
 ---
 
-## 4. Ingestion: per-row decision logic
+## 4. Parsing: file to record
+
+How a `.dat` file becomes the "one parsed record" §5 starts from. FCC's
+files are pipe-delimited with **no quoting or escaping of any kind**,
+which produces three hazards that a naive line-oriented reader handles
+silently wrongly. All three were found in real production data — see
+`docs/fcc-data-reference.md` §5b for the measurements.
+
+```mermaid
+flowchart TD
+    file(["A .dat file"]) --> phys["Read physical lines"]
+    phys --> pfx{"Line starts with<br/><b>RECORDTYPE|</b> ?"}
+
+    pfx -->|"yes"| flush["Yield the buffered record,<br/>start a new buffer"]
+    pfx -->|"no"| join["<b>Continuation</b> — a free-text field<br/>contained a bare CR/CRLF.<br/>Re-join onto the previous line"]
+    join --> phys
+    flush --> split["Split on '|'<br/>(never csv.reader)"]
+
+    split --> count{"Field count<br/>== schema?"}
+    count -->|"yes"| ok(["Record → §5"])
+    count -->|"too many"| extra["Unescaped '|' typed into a<br/>free-text field. Truncate,<br/><b>log a WARNING</b>"]
+    count -->|"too few"| pad["Short row. Pad with NULLs,<br/><b>log a WARNING</b>"]
+    extra --> ok
+    pad --> ok
+```
+
+**Why the record-type prefix, not the line, defines a record.** Ship's
+`SV.dat` embeds bare `CR`/`CRLF` inside its free-text voyage
+descriptions: 389 of its 1,068 physical lines are continuations. Reading
+line-by-line yielded 970 rows, 291 of them malformed; prefix-aware
+reassembly yields the correct 679. Every other file currently has zero
+continuations, but the logic is applied **generically** because the cost
+is negligible and the failure mode is silent corruption.
+
+**Why `split("|")` and never `csv.reader`.** Python's CSV module treats a
+leading `"` as quoting syntax, so a value like `"inland waters"` gets
+rewritten, and it re-splits exactly the embedded newlines that
+reassembly just repaired. FCC does not quote, so neither do we.
+
+**Why malformed rows are tolerated but never silent.** A pipe typed into
+a free-text field (e.g. `Director of Safety | Charter Ops Manager`) is
+*unparseable in principle* — nothing records where the real boundaries
+were. Affected rows are truncated/padded rather than aborting a 5.6M-row
+load, but each one logs a warning. At current scale this is 17 rows
+across all services, so `validate_schema.py` uses a 0.1% mismatch
+tolerance: high enough to ignore this known noise, low enough that a
+genuine layout change still fails loudly.
+
+---
+
+## 5. Ingestion: per-row decision logic
 
 What happens to a single parsed record. The `generate_diffs` flag is the
 top-level fork: bootstrap loads take a batched fast path that emits **no**
@@ -263,7 +319,7 @@ flowchart TD
 
 ---
 
-## 5. Notification pipeline
+## 6. Notification pipeline
 
 From a stored `change_event` to a message in someone's inbox. Matching and
 sending are separate processes joined by a Redis queue.
@@ -281,7 +337,7 @@ sequenceDiagram
     I->>DB: INSERT change_events
     Note over D: loops every<br/>DISPATCH_INTERVAL_SECONDS
 
-    D->>DB: Match events to active watches<br/>(callsign / uls_id / asr_reg / frn)<br/>LEFT JOIN to exclude pairs<br/>already delivered
+    D->>DB: Match events to active watches<br/>(callsign / uls_id / asr_reg / frn)<br/>AND service scope matches<br/>LEFT JOIN to exclude pairs<br/>already delivered
     DB-->>D: new (watch, event) pairs
 
     D->>DB: INSERT notification_deliveries (pending)<br/>ON CONFLICT DO NOTHING
@@ -311,9 +367,18 @@ delivery row (`LEFT JOIN ... WHERE nd.id IS NULL`), *and* the insert uses
 `(watch_id, change_event_id)`. Only ids actually returned by `RETURNING`
 get enqueued — so two dispatch runs racing each other cannot double-send.
 
+**Optional service scope.** A watch may be narrowed to one service
+(`amateur`, `tower`, `gmrs`, `aircraft`, `ship`) via
+`AND (w.service IS NULL OR w.service = ce.service)`. `NULL` means "any
+service", so every watch created before services existed keeps matching
+exactly as it did. The asymmetry is deliberate: a *scoped* watch never
+fires on an event whose own `service` is NULL (i.e. recorded before the
+column existed), because an event of unknown service can't be confirmed
+to be in scope.
+
 ---
 
-## 6. Delivery lifecycle
+## 7. Delivery lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -338,7 +403,7 @@ is nothing a retry could fix.
 
 ---
 
-## 7. Passwordless authentication
+## 8. Passwordless authentication
 
 No passwords are stored or transmitted. A single-use, hashed, expiring
 token is emailed; possession of the mailbox is the proof of identity.
@@ -390,7 +455,7 @@ email.
 
 ---
 
-## 8. Test-send
+## 9. Test-send
 
 Lets a user prove a channel works before relying on it. Notable because
 the `api` and `notifier` are **separate containers with separate
@@ -440,7 +505,7 @@ than the API's poll window — hence the worker, not the API, owns the
 
 ---
 
-## 9. Read-request lifecycle
+## 10. Read-request lifecycle
 
 Every public page load. Caddy is the only entry point; it splits static
 assets from API calls.
@@ -460,7 +525,7 @@ flowchart TD
     cors -->|"no"| reject["Blocked by browser<br/>(no ACAO header returned)"]
     cors -->|"yes"| limited{"Rate-limited<br/>endpoint?"}
 
-    limited -->|"yes: search, browse,<br/>new-hams, auth, admin"| rl["Check Redis counter"]
+    limited -->|"yes: search, all browse,<br/>new-hams, GMRS/aircraft/ship<br/>detail, auth, admin, test-send"| rl["Check Redis counter"]
     rl --> over{"Over<br/>limit?"}
     over -->|"yes"| r429["429 Too Many Requests"]
     over -->|"no"| authck
@@ -476,9 +541,19 @@ flowchart TD
     query["Query Postgres<br/>via async pool"] --> resp["JSON response"]
 ```
 
+**Known asymmetry in detail-endpoint limiting.** The GMRS, Aircraft and
+Ship routers rate-limit *both* their browse and detail endpoints
+(`personal_services.py` calls `enforce_rate_limit` in each), because they
+were written after the read-endpoint hardening pass. The older
+`GET /api/amateur/{call_sign}` and `GET /api/towers/{registration_number}`
+detail endpoints limit only browse, so their detail lookups are currently
+unthrottled. This is tracked as the `mcp-detail-endpoint-rate-limit` todo
+in `docs/plan.md` and should be closed before any unauthenticated MCP tool
+surface exposes those two endpoints.
+
 ---
 
-## 10. Data model
+## 11. Data model
 
 Three groups: **FCC raw tables** (mirror the public files), **application
 tables** (users, watches, delivery), and **derived objects** (materialized
@@ -572,7 +647,7 @@ Materialized views (refreshed at the end of any ingest that wrote data):
 
 ---
 
-## 11. Deployment: update.sh
+## 12. Deployment: update.sh
 
 ```mermaid
 flowchart TD
@@ -605,7 +680,7 @@ indefinitely. See `docs/plan.md`'s Progress Log.
 
 ---
 
-## 12. Operational runbook
+## 13. Operational runbook
 
 ### Fresh install
 

@@ -1993,6 +1993,53 @@ asserted in the API integration test, whose seed row was deliberately
 changed to model a straight-to-Extra first timer rather than another
 Technician.
 
+### Progress Log — architecture.md audit and the missing parse stage
+
+Audited `docs/architecture.md` end to end rather than only re-reading the
+sections touched by the personal-radio-services work, on the theory that
+a diagram file drifts silently in places nobody thought to look.
+
+Three real gaps were found. First, **§6's notification pipeline never
+mentioned the new per-watch service scope** at all, so the diagram still
+described pre-GMRS matching behaviour. Second, and more significantly,
+**the parse stage — file to record — was undocumented anywhere**, despite
+holding the subtlest correctness logic in the codebase: prefix-based line
+reassembly, the deliberate refusal to use `csv.reader`, and the
+tolerate-but-log handling of unescaped delimiters. Every one of those
+decisions had a hard-won reason recorded only in code comments. That is
+now §4, with a flowchart and three explainers, and §2's Level-0 `parse`
+and `diff` boxes link into §4/§5 so the drill-down path is discoverable.
+
+Third, **§10's rate-limit list was quietly wrong**: it read "search,
+browse, new-hams, auth, admin". Checking `enforce_rate_limit` call sites
+showed `personal_services.py` limits *both* browse and detail, while the
+older `amateur.py`/`towers.py` limit browse only — so GMRS/Aircraft/Ship
+callsign lookups are throttled and Amateur/Tower ones are not. The label
+now says so, and an explainer ties the asymmetry to the existing
+`mcp-detail-endpoint-rate-limit` todo, which must close before any
+unauthenticated MCP surface exposes those two endpoints.
+
+Renumbering old §5–§12 to §6–§13 broke cross-references, so all links
+were verified mechanically rather than by eye: a script resolved every
+intra-document anchor (13) and every `README.md` link into the file
+against the real heading list, catching one stale `[§12]` in
+`architecture.md` and two in `README.md`.
+
+All 15 Mermaid diagrams were **actually parsed**, not assumed valid —
+extracted and run through `mermaid.parse()` in a disposable `node:22`
+container. This mattered: the new §4 diagram embeds literal `|`
+characters in node labels (`RECORDTYPE|`, `Split on '|'`), and `|` is
+Mermaid's edge-label delimiter. Inside quoted labels it turns out to be
+safe, but that was worth proving rather than hoping. (Mermaid needs a DOM
+to get past `DOMPurify.addHook`; supplying `jsdom` globals makes headless
+validation work and is worth reusing for future diagram edits.)
+
+Every factual claim in the new §4 was re-checked against the source —
+the truncate/pad-and-warn behaviour in `parser.py`, and the
+`MISMATCH_TOLERANCE = 0.001` figure in `validate_schema.py`. Docs-only
+change; `architecture.md` is not baked into any image, so unlike
+`user-guide.md` this needs no redeploy.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

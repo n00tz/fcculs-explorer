@@ -273,7 +273,7 @@ row-level upserts mean a forced re-ingest never duplicates data.
 
 > See [`docs/architecture.md` §3](docs/architecture.md#3-ingestion-daily-catch-up-logic)
 > for a flowchart of this catch-up logic, and
-> [§12](docs/architecture.md#12-operational-runbook) for a decision tree
+> [§13](docs/architecture.md#13-operational-runbook) for a decision tree
 > on diagnosing a suspected gap.
 
 > **If the stack is down for more than 7 days**, the missed days have
@@ -413,7 +413,7 @@ whatever's checked out, e.g. to test an uncommitted change), `--no-restart`
 `:latest` and restart that unit (the script prints the exact command at the
 end of a run).
 
-> [`docs/architecture.md` §11](docs/architecture.md#11-deployment-updatesh)
+> [`docs/architecture.md` §12](docs/architecture.md#12-deployment-updatesh)
 > diagrams this flow, including why the skip-if-unchanged check inspects
 > all four images' revision labels rather than just `api`'s.
 
