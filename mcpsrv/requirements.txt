@@ -1,0 +1,12 @@
+# MCP Python SDK. 2.2 removed FastMCP; the server class is now
+# mcp.server.mcpserver.MCPServer.
+mcp==2.2.*
+
+# Imported directly by app/client.py, so pinned explicitly rather than
+# relied on transitively via mcp. This is httpx2 (Pydantic's continuation
+# of httpx, new distribution and import name), NOT the httpx==0.28.* used
+# by api/ and notifier/ -- the SDK requires httpx2, and shipping both HTTP
+# stacks in one image would be pointless.
+httpx2==2.12.*
+
+uvicorn[standard]==0.52.*
