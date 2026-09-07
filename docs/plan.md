@@ -1966,6 +1966,33 @@ a tooltip saying so. Rare junk values in `SH.general_class` (5 codes
 cover 99.997% of rows) and `special_class` are likewise left undecoded
 rather than guessed.
 
+### New Hams: operator class column
+
+Added an operator-class column to both New Hams components. The
+motivating observation was correct and is measurable in production data:
+in the current 10-day window, **25 first-time licensees tested straight
+into General and 8 into Amateur Extra — over 10% of the feed**. A table
+that implied everyone starts at Technician was quietly erasing those
+people's achievement.
+
+`/api/new-hams` gains `am.operator_class` via a `LEFT JOIN amat_am`, and
+both the homepage widget and `/new-hams` render a Class column. It shows
+the **full class name rather than the bare FCC letter**, since the
+explicit goal was at-a-glance recognition and a lone `E` communicates
+nothing to a casual visitor; the raw code and description remain
+available in the tooltip, consistent with the project's field-definition
+standard. New `.pill.opclass-*` variants emphasise General and Extra so a
+higher-class debut stands out from the Technician majority.
+
+Verified against production before writing the UI: **clubs have no
+operator class at all** (all 4 in the window are NULL), so the column
+needs a genuine em-dash fallback, and the API deliberately returns the
+field present-but-null rather than omitting it so the frontend can tell
+"club, not applicable" apart from a missing field. Both cases are
+asserted in the API integration test, whose seed row was deliberately
+changed to model a straight-to-Extra first timer rather than another
+Technician.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

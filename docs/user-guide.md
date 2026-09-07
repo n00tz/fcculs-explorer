@@ -112,6 +112,12 @@ Below the summary is a small table showing, for each new grant:
 - **Name** — the new operator's name, or the club's name.
 - **Type** — a small badge that says "Individual" or "Club" so you can
   tell them apart at a glance.
+- **Class** — the operator class the new ham earned: **Technician**,
+  **General**, or **Amateur Extra**. Most people start at Technician, but
+  you don't have to — some study hard and pass the General or even the
+  Amateur Extra exam on their very first try, and that deserves to be
+  noticed, so those are highlighted. Clubs don't take exams, so a club
+  station shows a dash here instead.
 - **City/State** — where they're located.
 - **Grant Date** — the day the FCC granted the license.
 
