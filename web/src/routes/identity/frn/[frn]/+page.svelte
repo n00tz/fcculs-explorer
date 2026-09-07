@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
+	import { serviceRoute } from '$lib/personalServices.js';
 
 	let frn = '';
 	let data = null;
@@ -53,10 +54,10 @@
 						<tr>
 							<td>{m.source}</td>
 							<td>
-								{#if m.source === 'amateur'}
-									<a href={`/amateur/${m.subject_key}`}>{m.subject_key}</a>
+								{#if serviceRoute(m.source, m.subject_key)}
+									<a href={serviceRoute(m.source, m.subject_key)}>{m.subject_key}</a>
 								{:else}
-									<a href={`/towers/${m.subject_key}`}>{m.subject_key}</a>
+									{m.subject_key}
 								{/if}
 							</td>
 							<td>{m.entity_name}</td>

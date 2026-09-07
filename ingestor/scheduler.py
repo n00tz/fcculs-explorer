@@ -107,7 +107,27 @@ def discover_available_days(service: str) -> list:
     return available
 
 
-def run_daily_job(run_date: date | None = None, max_days: int | None = None) -> dict:
+def resolve_services(names: list[str] | None) -> dict:
+    """Resolve a list of --service arguments into the record-type maps to act on.
+
+    Returns every service when nothing is specified, so existing invocations
+    (and the scheduled daily job) are unchanged. Unknown names fail loudly
+    rather than silently ingesting nothing, which would otherwise look like a
+    successful no-op run.
+    """
+    if not names:
+        return dict(SERVICES)
+    unknown = [n for n in names if n not in SERVICES]
+    if unknown:
+        raise SystemExit(
+            f"unknown service(s): {', '.join(sorted(unknown))}. "
+            f"Valid choices: {', '.join(sorted(SERVICES))}"
+        )
+    return {n: SERVICES[n] for n in names}
+
+
+def run_daily_job(run_date: date | None = None, max_days: int | None = None,
+                  services: list[str] | None = None) -> dict:
     """Catch up every not-yet-ingested daily transaction file for every
     service, oldest first.
 
@@ -123,7 +143,7 @@ def run_daily_job(run_date: date | None = None, max_days: int | None = None) -> 
     summary = {}
     ingested_any = False
     try:
-        for service, record_types in SERVICES.items():
+        for service, record_types in resolve_services(services).items():
             available = discover_available_days(service)
             if not available:
                 logger.warning("no dateable daily files found for %s", service)
@@ -215,20 +235,24 @@ def run_daily_job(run_date: date | None = None, max_days: int | None = None) -> 
     return summary
 
 
-def bootstrap_all() -> dict:
+def bootstrap_all(services: list[str] | None = None) -> dict:
     """One-time (or disaster-recovery) full load from the complete weekly
     dump. Diffing is disabled since every row is new on a bootstrap load.
 
     Note this loads ONLY the weekly snapshot; run the catch-up pass
     afterwards (`python scheduler.py --catch-up`) to apply every daily
     increment published since that snapshot was cut.
+
+    `services` limits the load to specific services, which is how a new
+    service is added to an existing deployment without re-loading (and
+    briefly disrupting) data that is already live and correct.
     """
     conn = psycopg.connect(DATABASE_URL, autocommit=False)
     summary = {}
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            for service, record_types in SERVICES.items():
+            for service, record_types in resolve_services(services).items():
                 logger.info("downloading complete dump for %s", service)
                 content = download_complete(service)
                 extracted = extract_zip(content, tmp_path / service)
@@ -254,14 +278,14 @@ def bootstrap_all() -> dict:
     return summary
 
 
-def report_status() -> None:
+def report_status(services: list[str] | None = None) -> None:
     """Print what FCC currently offers vs. what has been ingested, so an
     operator can see gaps at a glance (and confirm a catch-up worked)."""
     conn = psycopg.connect(DATABASE_URL, autocommit=False)
     try:
         today = datetime.now(timezone.utc).date()
         earliest = today - timedelta(days=DAILY_WINDOW_DAYS)
-        for service in SERVICES:
+        for service in resolve_services(services):
             done = ingested_data_dates(conn, service, earliest)
             print(f"\n{service}:")
             for dow, data_date, last_modified in discover_available_days(service):
@@ -288,19 +312,27 @@ def main():
         help="show which daily files FCC currently offers and which are already ingested",
     )
     parser.add_argument(
+        "--service", action="append", dest="services", metavar="NAME",
+        help=(
+            "limit the operation to one service (repeatable, e.g. "
+            "--service gmrs --service ship). Defaults to all services. "
+            f"Choices: {', '.join(sorted(SERVICES))}"
+        ),
+    )
+    parser.add_argument(
         "--max-days", type=int, default=None,
         help=f"how many days back to consider (default {DAILY_WINDOW_DAYS}, FCC's rolling window)",
     )
     args = parser.parse_args()
 
     if args.bootstrap:
-        bootstrap_all()
+        bootstrap_all(services=args.services)
         return
     if args.status:
-        report_status()
+        report_status(services=args.services)
         return
     if args.run_once or args.catch_up:
-        run_daily_job(max_days=args.max_days)
+        run_daily_job(max_days=args.max_days, services=args.services)
         return
 
     scheduler = BlockingScheduler(timezone="UTC")

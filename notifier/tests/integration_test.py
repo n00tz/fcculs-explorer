@@ -145,7 +145,81 @@ def main():
     assert channel["is_verified"] is True, channel
     print("send_test_message() marks is_verified OK")
 
+    check_service_scoped_matching(channel_id)
+
     print("ALL NOTIFIER INTEGRATION CHECKS PASSED")
+
+
+def check_service_scoped_matching(channel_id: int):
+    """A watch may optionally be scoped to one service. Prove that:
+
+      * a gmrs-scoped watch matches a gmrs event but NOT an equivalent
+        amateur event for the same callsign, and
+      * an unscoped watch (service IS NULL) still matches BOTH -- which is
+        what every watch created before services existed relies on.
+
+    This is the backward-compatibility guarantee for the whole feature, so
+    it's asserted against the real matcher SQL rather than reasoned about.
+    """
+    from app import matcher
+    from app.db import get_connection
+
+    conn = get_connection()
+    with conn.cursor() as cur:
+        cur.execute("SELECT user_id FROM notification_channels WHERE id = %s", (channel_id,))
+        user_id = cur.fetchone()["user_id"]
+
+        # Same callsign, two services -- the only thing distinguishing the
+        # events is change_events.service.
+        cur.execute(
+            """
+            INSERT INTO change_events (subject_type, subject_key, uls_system_id,
+                                       field_name, old_value, new_value,
+                                       source_file, effective_date, service)
+            VALUES ('gmrs_license', 'WRAA999', '600999', 'license_status', 'A', 'E',
+                    'l_gm_mon.zip', '2026-09-02', 'gmrs'),
+                   ('amateur_license', 'WRAA999', '600998', 'license_status', 'A', 'E',
+                    'l_am_mon.zip', '2026-09-02', 'amateur')
+            RETURNING id
+            """
+        )
+        gmrs_event_id, amateur_event_id = [row["id"] for row in cur.fetchall()]
+
+        cur.execute(
+            """
+            INSERT INTO watches (user_id, subject_type, subject_value, channel_id, service)
+            VALUES (%s, 'callsign', 'WRAA999', %s, 'gmrs') RETURNING id
+            """,
+            (user_id, channel_id),
+        )
+        scoped_watch_id = cur.fetchone()["id"]
+        conn.commit()
+
+    matches = matcher.find_new_matches(conn)
+    scoped = {m["change_event_id"] for m in matches if m["watch_id"] == scoped_watch_id}
+    assert gmrs_event_id in scoped, (gmrs_event_id, matches)
+    assert amateur_event_id not in scoped, (
+        "a gmrs-scoped watch must not fire on an amateur event", matches
+    )
+    print("service-scoped watch matches only its own service OK")
+
+    # Now an unscoped watch on the same callsign: must match both events,
+    # proving pre-existing watches are unaffected by the new column.
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO watches (user_id, subject_type, subject_value, channel_id, service)
+            VALUES (%s, 'callsign', 'WRAA999', %s, NULL) RETURNING id
+            """,
+            (user_id, channel_id),
+        )
+        unscoped_watch_id = cur.fetchone()["id"]
+        conn.commit()
+
+    matches = matcher.find_new_matches(conn)
+    unscoped = {m["change_event_id"] for m in matches if m["watch_id"] == unscoped_watch_id}
+    assert {gmrs_event_id, amateur_event_id} <= unscoped, (unscoped, matches)
+    print("unscoped (legacy) watch still matches every service OK")
 
 
 if __name__ == "__main__":

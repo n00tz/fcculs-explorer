@@ -15,7 +15,7 @@ Apache/mod_autoindex indexes:
 - Weekly full dumps: `https://data.fcc.gov/download/pub/uls/complete/`
 - Daily transaction files: `https://data.fcc.gov/download/pub/uls/daily/`
 
-## 2. Files needed for this project (v1 scope: Amateur + ASR/Tower)
+## 2. Files needed for this project (Amateur + ASR/Tower + personal radio services)
 
 ### Weekly full dumps (`.../complete/`)
 
@@ -26,6 +26,16 @@ Apache/mod_autoindex indexes:
 | `r_tower.zip` | ASR/Tower full **registration** database (bootstrap load) |
 | `a_tower.zip` | ASR full application database (not needed for v1) |
 | `d_tower.zip` | ASR "deleted/dismantled towers" extract (consider for v1 — cheap way to detect dismantled towers) |
+| `l_gmrs.zip` | GMRS full license database (~53 MB) |
+| `l_aircr.zip` | Aircraft (Part 87) full license database (~16 MB) |
+| `l_ship.zip` | Ship (Part 80) full license database (~45 MB) |
+
+> **`l_aircraft.zip` does not exist — the real name is `l_aircr.zip`.**
+> FCC returns a **`302` redirect, not a `404`**, for a file that isn't
+> there, so an existence check that only tests for 404 will report a wrong
+> filename as present. The `complete/` and `daily/` directory listings are
+> enabled and are the authoritative source for filenames; use them rather
+> than guessing at a name.
 
 ### Daily transaction files (`.../daily/`), pattern `{prefix}_{service}_{dow}.zip`, `dow ∈ {mon,tue,wed,thu,fri,sat,sun}`
 
@@ -33,6 +43,9 @@ Apache/mod_autoindex indexes:
 |---|---|---|
 | Amateur | `l_am_mon.zip` … `l_am_sun.zip` | `a_am_mon.zip` … `a_am_sun.zip` |
 | ASR/Tower | `r_tow_mon.zip` … `r_tow_sun.zip` | `a_tow_mon.zip` … `a_tow_sun.zip`, `d_tow_{dow}.zip` |
+| GMRS | `l_gm_mon.zip` … `l_gm_sun.zip` | `a_gm_{dow}.zip` |
+| Aircraft | `l_ac_mon.zip` … `l_ac_sun.zip` | `a_ac_{dow}.zip` |
+| Ship | `l_sh_mon.zip` … `l_sh_sun.zip` | `a_sh_{dow}.zip` |
 
 No rate-limiting/auth observed; ingestor should still use reasonable
 delay/retry/backoff as a good citizen and for resilience.
@@ -178,6 +191,72 @@ re-tested once the ingestor is loading a full (or larger sample) dataset.
 Also corrected: the coordinate join uses `coordinate_type = 'T'` (observed
 in real data), not the originally assumed `'P'`.
 
+## 5b. Personal radio services: GMRS, Aircraft, Ship (verified 2026-09-07)
+
+Verified by downloading the real complete dumps and strict-parsing **every
+row** (5,622,629 rows total), not by sampling.
+
+### Record types actually present
+
+| Service | Records ingested | Row counts (complete dump) |
+|---|---|---|
+| GMRS | `HD`, `EN`, `HS` — **no service-specific record exists** | 609,247 HD/EN; 1,046,673 HS |
+| Aircraft | `HD`, `EN`, `HS`, `AC` | 152,633 HD/EN; 152,632 AC; 365,787 HS |
+| Ship | `HD`, `EN`, `HS`, `SH`, `SR`, `SV`, `SE` | 402,277 HD/EN; 402,276 SH; 131,815 SR; 679 SV; 368 SE; 1,194,085 HS |
+
+### Key finding: HD/EN/HS are generic, not Amateur-specific
+
+`HD` (59 fields), `EN` (30) and `HS` (6) are **byte-identical in layout
+across all services** — proven by strict-parsing every row of every
+service with exact field counts and zero mismatches. They are generic ULS
+record types. Accordingly `schemas.py` names them `ULS_HD`/`ULS_EN`/
+`ULS_HS` (the old `AMAT_*` names are retained as aliases), and the
+per-service tables are created with
+`CREATE TABLE ... (LIKE amat_hd INCLUDING ALL)` so structural identity is
+a schema guarantee rather than three hand-transcribed copies that can
+drift.
+
+### Three parsing hazards found in the real data
+
+1. **Embedded newlines in `SV.dat`.** 389 of its 1,068 physical lines are
+   continuations — the free-text voyage description contains bare `CR`/
+   `CRLF`. A line-oriented parser silently produces garbage: the old
+   parser yielded 970 rows of which 291 were malformed; the current
+   prefix-aware reassembly yields 679 correct records. `HD`/`EN`/`HS`/
+   `SH`/`SR`/`SE` have zero continuations, but reassembly is applied
+   generically because it is strictly safer.
+2. **Unescaped `|` inside free-text fields.** FCC applies no quoting or
+   escaping whatsoever, so a pipe typed into a free-text field breaks that
+   row's field count (e.g. an attention line reading
+   `Director of Safety | Charter Ops Manager`). Only 17 rows out of
+   5.62M are affected, and they are *unparseable in principle* — there is
+   no way to know where the real boundaries were. They are tolerated via
+   truncate/pad and **logged as a warning** so the damage is never silent.
+   `validate_schema.py` uses `MISMATCH_TOLERANCE = 0.001` to distinguish
+   this known noise from an actual layout change.
+3. **Double quotes in free text** (e.g. `"inland waters"`). Python's
+   `csv.reader` treats a leading `"` as CSV syntax and rewrites the value,
+   and also re-splits the embedded newlines that reassembly deliberately
+   preserved. The parser therefore uses a plain `raw.split("|")`.
+
+### Ship `SV`: one description split across several rows
+
+Separately from the embedded-newline issue, FCC splits a long voyage
+description across multiple sequence-numbered `SV` rows sharing one
+`unique_system_identifier` (193 such cases). The natural key **must** be
+`(unique_system_identifier, voyage_number)` — a single-column key makes
+re-ingest collapse the description down to its last fragment. Enforced by
+a composite primary key in `db/008` and re-joined in display order by the
+API and UI.
+
+### Column typing
+
+Every numeric-looking column was checked against real data. All are
+digits-only **except `ship_se.count_vhf_dsc`, which contains `'Y'`**
+despite its name. All columns are therefore `TEXT` (ingest robustness and
+project convention); numeric sorting is handled in the API with a
+regex-guarded cast.
+
 ## 6. Known gaps / verify-before-production
 
 - Exact current version number of the generic ULS PDF spec unconfirmed
@@ -232,3 +311,40 @@ Discovered while researching field-level tooltip/definition support
   not a Y/N flag as originally assumed) — corrected to display the raw
   code with a "not officially documented" field-help note rather than a
   fabricated decode.
+
+### Code definitions for GMRS / Aircraft / Ship (researched 2026-09-07)
+
+Sources: FCC `uls_code_definitions_20240718.txt`, FCC **Form 605**
+(Schedules B, C and G, which bind letter codes verbatim), and the FCC
+radio-service code CSV. Six of the seven coded fields were substantiated
+from first-party material:
+
+- `radio_service_code`: `ZA` = General Mobile Radio (GMRS), `AC` =
+  Aircraft, `SA` = Ship Recreational or Voluntarily Equipped, `SB` = Ship
+  Compulsory Equipped, `SE` = Ship Exemption.
+- `AC.type_of_carrier`: `P` = Private aircraft, `A` = Air carrier
+  (Form 605 Schedule C item 5).
+- `SH.type_of_authorization`: `R` = Regular (one vessel), `P` = Portable,
+  `F` = Fleet. Real data also contains a single lowercase `'r'`;
+  `describeCode()` uppercases unknown codes as a fallback, so it resolves.
+- `SH.general_class`: only 5 codes are defined (`MM`/`PL`/`SV`/`FV`/`GV`)
+  and they cover **99.997%** of rows. Five rare values (`PH`, `MV`, `SH`,
+  `PA`, `MB` — 1 to 4 rows each) are data-entry errors and are
+  deliberately left undecoded.
+- `SH.special_class`: 30 codes defined; 51 distinct values appear in the
+  data. The extra 21 are tiny-count dirty data, left undecoded.
+- `SE.ship_type`: `C` = Cargo vessel, `P` = Passenger vessel. Form-derived
+  (high confidence) rather than literally printed in a code table.
+
+**One genuine negative result worth recording:**
+`SH.working_freq_s1`/`working_freq_s2` hold values shaped like `Wnn`, and
+**no published decode table for them exists anywhere** — confirmed by an
+exhaustive search across FCC documentation and 10 independent third-party
+ULS parsers. They are deliberately left undefined, with a tooltip saying
+exactly that, rather than guessed.
+
+**Correction adopted from this research:** `SH.station_number` is
+officially the **MMSI Number**. Other official display names captured:
+`self_id_number` = "Sel Call Number", `comsat_id_number` = "Sel Call —
+INMARSAT", `ship_number` = "Official Number of Ship", `radiotelegraph` =
+"Radiotelegraph Working Series Requested".

@@ -12,6 +12,12 @@ router = APIRouter(prefix="/api/watches", tags=["watches"])
 
 ALLOWED_SUBJECT_TYPES = {"callsign", "uls_id", "asr_registration_number", "frn"}
 
+# Optional per-watch service scope. NULL/None means "any service", which is
+# the default and preserves the original behavior: a plain callsign watch
+# matches across every dataset. Users who hold, say, both an Amateur and a
+# GMRS licence can narrow a watch to just one of them.
+ALLOWED_SERVICES = {"amateur", "tower", "gmrs", "aircraft", "ship"}
+
 # Kept in sync with channels.py's MAX_CHANNELS_PER_USER -- see that file
 # for the rationale (a secondary throttle on top of URL-safety checks).
 MAX_WATCHES_PER_USER = 50
@@ -21,6 +27,7 @@ class WatchCreate(BaseModel):
     subject_type: str
     subject_value: str
     channel_id: int
+    service: str | None = None
 
 
 @router.get("")
@@ -28,7 +35,8 @@ async def list_watches(user: dict = Depends(get_current_user), conn: AsyncConnec
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT w.id, w.subject_type, w.subject_value, w.channel_id, w.is_active, w.created_at,
+            SELECT w.id, w.subject_type, w.subject_value, w.channel_id, w.service,
+                   w.is_active, w.created_at,
                    c.channel_type, c.label
             FROM watches w
             JOIN notification_channels c ON c.id = w.channel_id
@@ -47,6 +55,12 @@ async def create_watch(
 ):
     if body.subject_type not in ALLOWED_SUBJECT_TYPES:
         raise HTTPException(status_code=400, detail=f"subject_type must be one of {sorted(ALLOWED_SUBJECT_TYPES)}")
+    service = body.service.strip().lower() if body.service else None
+    if service and service not in ALLOWED_SERVICES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"service must be one of {sorted(ALLOWED_SERVICES)}, or omitted for all services",
+        )
 
     async with conn.cursor() as cur:
         await cur.execute("SELECT count(*) AS total FROM watches WHERE user_id = %s", (user["id"],))
@@ -64,11 +78,11 @@ async def create_watch(
         try:
             await cur.execute(
                 """
-                INSERT INTO watches (user_id, subject_type, subject_value, channel_id)
-                VALUES (%s, %s, %s, %s)
-                RETURNING id, subject_type, subject_value, channel_id, is_active, created_at
+                INSERT INTO watches (user_id, subject_type, subject_value, channel_id, service)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, subject_type, subject_value, channel_id, service, is_active, created_at
                 """,
-                (user["id"], body.subject_type, subject_value, body.channel_id),
+                (user["id"], body.subject_type, subject_value, body.channel_id, service),
             )
         except Exception as exc:
             if "unique" in str(exc).lower():

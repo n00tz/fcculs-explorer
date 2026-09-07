@@ -18,6 +18,17 @@
  * ULS & amateur radio licensing conventions -- same "best effort, unknown
  * falls back to the raw code" spirit already used by
  * api/app/history_codes.py and notifier/app/senders/email_to_sms.py.
+ *
+ * The GMRS/Aircraft/Ship code tables (`type_of_carrier`,
+ * `type_of_authorization`, `ship_general_class`, `ship_special_class`,
+ * `ship_type`, and the ZA/AC/SA/SB/SE service codes) are sourced from FCC
+ * Form 605 (Main Form + Schedules B, C and G), the FCC ULS code-definitions
+ * reference, and FCC's published radio-service code list, then checked
+ * against the real distinct values in the downloaded dumps (2026-09-07).
+ * Where FCC publishes no decode table at all -- notably ship
+ * `working_freq_s1`/`working_freq_s2` -- the field is left intentionally
+ * undecoded and rendered as the raw code, because a plausible-looking wrong
+ * definition is worse than none.
  * See docs/fcc-data-reference.md §7 for the full sourcing notes.
  */
 
@@ -49,7 +60,58 @@ export const FIELD_HELP = {
 	previous_purpose: 'Purpose code of the prior filing for this structure, if any.',
 	painting_and_lighting: 'FAA-specified paint/lighting scheme required for aviation-obstruction marking.',
 	proposed_marking_and_lighting: 'Paint/lighting scheme proposed in the current filing, pending FAA review.',
-	county_code: 'FIPS county code for the structure location (not decoded per-county here; cross-reference a FIPS county table if needed).'
+	county_code: 'FIPS county code for the structure location (not decoded per-county here; cross-reference a FIPS county table if needed).',
+
+	// --- Aircraft (Part 87, aircr_ac) ---
+	aircraft_count: 'Number of aircraft covered by this license.',
+	type_of_carrier: 'Whether the aircraft is flown privately or as a commercial air carrier.',
+	portable_indicator: 'Whether the radio equipment is portable (may be moved between aircraft) rather than fixed to one airframe.',
+	fleet_indicator: 'Whether this license covers a fleet of aircraft under a single authorization.',
+	n_number: 'FAA aircraft registration ("tail number") of the aircraft this station is installed in.',
+
+	// --- Ship (Part 80, ship_sh) ---
+	type_of_authorization: 'Whether this licence covers one vessel, a single portable transmitter used across vessels, or a whole fleet.',
+	count_in_fleet: 'Number of vessels covered, when this is a fleet licence.',
+	general_class: 'Broad category of vessel (FCC "General Class of Ship").',
+	special_class: 'Specific vessel type within the general class (FCC "Special Class of Ship").',
+	ship_name: 'Name of the vessel.',
+	ship_number: 'Official number of the ship (as registered with the vessel documentation authority).',
+	international_voyages: 'Whether the vessel travels on international voyages.',
+	foreign_communications: 'Whether the station is authorized to communicate with foreign coast stations.',
+	radiotelegraph: 'Whether a Morse radiotelegraph working series has been requested for this vessel.',
+	mmsi_request: 'Whether a Maritime Mobile Service Identity (MMSI) was requested with this application.',
+	gross_tonnage: 'Gross tonnage of the vessel (a measure of internal volume, not weight).',
+	ship_length: 'Overall length of the vessel, in feet.',
+	// Deliberately NOT decoded: FCC publishes the field name but no table of
+	// what the "Wnn" values mean, and no third-party ULS parser decodes them
+	// either. A wrong tooltip would be worse than none.
+	working_freq_s1: 'Working frequency series 1. FCC does not publish a decode table for these codes; shown as-is.',
+	working_freq_s2: 'Working frequency series 2. FCC does not publish a decode table for these codes; shown as-is.',
+	self_id_number: 'Selective-calling (Sel Call) number assigned to this station.',
+	comsat_id_number: 'INMARSAT selective-calling identity for this station.',
+	station_number: 'Maritime Mobile Service Identity (MMSI) -- the 9-digit number that identifies this vessel in digital selective calling and AIS.',
+
+	// --- Ship radio equipment (ship_sr) ---
+	epirb_identification_code: 'Identification code of the vessel\u2019s Emergency Position-Indicating Radio Beacon (EPIRB).',
+	epirb_406_mhz: 'Whether the vessel carries a 406 MHz EPIRB (satellite distress beacon).',
+	epirb_121_5_mhz: 'Whether the vessel carries a 121.5 MHz EPIRB (homing distress beacon).',
+	sart: 'Whether the vessel carries a Search and Rescue Transponder (SART), used to show a lifeboat\u2019s position on rescuers\u2019 radar.',
+	dsc: 'Whether the vessel carries Digital Selective Calling equipment, used to send automated distress alerts.',
+	raft_count: 'Number of liferafts carried.',
+	lifeboat_count: 'Number of lifeboats carried.',
+	vessel_capacity: 'Total number of people the vessel is certified to carry.',
+
+	// --- Ship exemption request (ship_se) ---
+	ship_type: 'Vessel type as certified by the U.S. Coast Guard.',
+	radiotelephone_exempt_req: 'Whether an exemption from radiotelephone (VHF/MF) equipment requirements was requested.',
+	gmdss_exemp_req: 'Whether an exemption from Global Maritime Distress and Safety System (GMDSS) requirements was requested.',
+	radio_dir_exempt_req: 'Whether an exemption from radio direction-finding equipment requirements was requested.',
+	vessel_size_exempt: 'Vessel size given as a ground for the exemption request.',
+	equipment_exempt: 'Variety of equipment already on board, given as a ground for the exemption request.',
+	ltd_routes_exempt: 'Limited routes travelled, given as a ground for the exemption request.',
+	cond_voyages_exempt: 'Conditions of the voyages undertaken, given as a ground for the exemption request.',
+	other_exempt: 'Some other ground was given for the exemption request.',
+	voyage_description: 'Operator\u2019s free-text description of the voyages the vessel undertakes, supporting an exemption request.'
 };
 
 // Code -> human description maps, keyed by a category name shared across
@@ -68,7 +130,15 @@ export const CODE_MAPS = {
 	},
 	radio_service_code: {
 		HA: 'Amateur',
-		HV: 'Vanity (Amateur)'
+		HV: 'Vanity (Amateur)',
+		// Personal radio services added alongside Amateur. Strings are the
+		// FCC's own service descriptions from its published radio-service
+		// code list.
+		ZA: 'General Mobile Radio (GMRS)',
+		AC: 'Aircraft',
+		SA: 'Ship Recreational or Voluntarily Equipped',
+		SB: 'Ship Compulsory Equipped',
+		SE: 'Ship Exemption'
 	},
 	// FCC ULS entity-record status code (amat_en.status_code) -- per the
 	// FCC's own generic ULS code-definitions reference: blank normally
@@ -237,6 +307,88 @@ export const CODE_MAPS = {
 		TREE: 'Tree used as an antenna support',
 		UPOLE: 'Utility pole/tower used to provide service',
 		UTOWER: 'Unguyed, free-standing tower'
+	},
+
+	// --- Aircraft (Part 87) ---------------------------------------------
+	// FCC Form 605 Schedule C, Item 5 binds these letters explicitly:
+	// "If the application is for a Private Aircraft, enter 'P'. Otherwise,
+	// enter 'A' for Air Carrier."
+	type_of_carrier: {
+		P: 'Private aircraft',
+		A: 'Air carrier'
+	},
+
+	// --- Ship (Part 80) -------------------------------------------------
+	// FCC Form 605 Schedule B, Item 4 (and the FCC ULS code-definitions
+	// reference) define exactly these three values.
+	type_of_authorization: {
+		R: 'Regular (one vessel only)',
+		P: 'Portable (one transmitter used aboard various U.S. vessels)',
+		F: 'Fleet (several vessels under one authorization)'
+	},
+
+	// FCC "General Class of Ship". The FCC defines exactly these five codes;
+	// a handful of rows in the real data carry other values (single-row
+	// data-entry errors, e.g. a Special Class code typed into this field),
+	// which deliberately fall through to being shown as the raw code rather
+	// than guessed at.
+	ship_general_class: {
+		MM: 'Merchant',
+		PL: 'Pleasure',
+		SV: 'Rescue',
+		FV: 'Fishing',
+		GV: 'Official service ship'
+	},
+
+	// FCC "Special Class of Ship" -- the 30 codes FCC publishes on Form 605
+	// Schedule B. As above, rare unlisted values render as the raw code.
+	ship_special_class: {
+		ACV: 'Air-cushion vehicle',
+		AUX: 'Auxiliary ship',
+		BLK: 'Bulk carrier',
+		BLN: 'Whaler',
+		BTA: 'Factory ship',
+		CA: 'Cargo ship',
+		CAB: 'Coaster',
+		CBL: 'Cable ship',
+		CHA: 'Barge',
+		CHR: 'Trawler',
+		CIT: 'Tanker',
+		CON: 'Container ship',
+		ECO: 'Training ship',
+		EXP: 'Research or survey ship',
+		FBT: 'Ferry',
+		FRG: 'Reefer',
+		MTB: 'Motorboat',
+		OIL: 'Oil tanker',
+		PA: 'Passenger ship',
+		PH: 'Fishing vessel',
+		PLT: 'Pilot tender',
+		PMX: 'Cargo and passenger',
+		RAM: 'Salvage ship',
+		RAV: 'Supply vessel',
+		SLO: 'Sloop',
+		TPO: 'Ore carrier',
+		TRA: 'Tramp',
+		TUG: 'Tug',
+		VDT: 'Hydrofoil',
+		VLR: 'Sailing ship',
+		YAT: 'Yacht'
+	},
+
+	// FCC Form 605 Schedule G, Item 4a: "Vessel is certified by the U.S.
+	// Coast Guard as a: Passenger / Cargo vessel."
+	ship_type: {
+		C: 'Cargo vessel',
+		P: 'Passenger vessel'
+	},
+
+	// Shared Y/N flag decode, used by the many indicator columns in the
+	// aircraft and ship records (portable/fleet indicators, equipment
+	// present, exemption grounds claimed, and so on).
+	yes_no: {
+		Y: 'Yes',
+		N: 'No'
 	}
 };
 

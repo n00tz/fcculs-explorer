@@ -2,6 +2,7 @@
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
 	import HeroGraphic from '$lib/HeroGraphic.svelte';
+	import { serviceRoute, PERSONAL_SERVICE_LIST } from '$lib/personalServices.js';
 
 	let query = '';
 	let results = [];
@@ -35,10 +36,14 @@
 	}
 
 	function href(result) {
-		if (result.result_type === 'amateur' || result.result_type === 'amateur_entity') {
-			return `/amateur/${result.key}`;
-		}
-		return `/towers/${result.key}`;
+		// Result types are `<service>` (identifier match) and
+		// `<service>_entity` (licensee-name match), plus two service-specific
+		// identifier types. Strip the suffix to get the owning service, so
+		// adding a service needs no change here.
+		const type = result.result_type;
+		const base = type.replace(/_(entity|n_number|name)$/, '');
+		const route = serviceRoute(base, result.key);
+		return route ?? `/towers/${result.key}`;
 	}
 
 	function kindLabel(type) {
@@ -46,7 +51,15 @@
 			amateur: 'Callsign',
 			amateur_entity: 'Amateur Licensee',
 			tower: 'Tower Registration',
-			tower_entity: 'Tower Entity'
+			tower_entity: 'Tower Entity',
+			gmrs: 'GMRS Callsign',
+			gmrs_entity: 'GMRS Licensee',
+			aircraft: 'Aircraft Callsign',
+			aircraft_entity: 'Aircraft Licensee',
+			aircraft_n_number: 'Aircraft N-Number',
+			ship: 'Ship Callsign',
+			ship_entity: 'Ship Licensee',
+			ship_name: 'Ship Name'
 		}[type] ?? type;
 	}
 
@@ -103,11 +116,12 @@
 	<div class="hero-text">
 		<h1>A fast, modern way to browse the FCC ULS — and know the moment it changes</h1>
 		<p class="muted">
-			Search and cross-link Amateur Radio Service licenses and Antenna Structure Registrations,
-			traverse the relationships behind a callsign or FRN (previous callsigns, club trustees,
-			shared tower sites), and watch anything that matters to you — no password required. Sign
-			in with just an email and get alerts by email, SMS, or webhook the moment a daily FCC
-			update touches your callsign, FRN, or tower.
+			Search and cross-link Amateur Radio, GMRS, Aircraft and Ship licenses alongside Antenna
+			Structure Registrations, traverse the relationships behind a callsign or FRN (previous
+			callsigns, club trustees, shared tower sites, and every service a single FRN holds),
+			and watch anything that matters to you — no password required. Sign in with just an
+			email and get alerts by email, SMS, or webhook the moment a daily FCC update touches
+			your callsign, FRN, or tower.
 		</p>
 	</div>
 	<HeroGraphic />
@@ -201,8 +215,9 @@
 	<div class="card feature-card">
 		<h3>🔎 Browse &amp; search</h3>
 		<p>
-			Paginated Amateur Radio and Tower Structure tables with click-to-sort columns and
-			partial-match filters on every displayed field — city, state, name, callsign, and more.
+			Paginated tables for every service we cover — Amateur Radio, GMRS, Aircraft, Ship, and
+			Tower Structures — with click-to-sort columns and partial-match filters on every
+			displayed field: city, state, name, callsign, N-number, ship name, MMSI, and more.
 		</p>
 	</div>
 	<div class="card feature-card">
@@ -210,7 +225,9 @@
 		<p>
 			Detail pages cross-link by FRN, licensee, and site so you can traverse the full history
 			behind a callsign — previous callsigns tied to the same FRN, club trustees, and towers
-			sharing a location — without falling back to a search box every time.
+			sharing a location — without falling back to a search box every time. Because grouping
+			spans services, one FRN lookup shows a person's whole FCC footprint: their ham licence,
+			their GMRS licence, and any aircraft, vessel or tower they're tied to.
 		</p>
 	</div>
 	<div class="card feature-card">

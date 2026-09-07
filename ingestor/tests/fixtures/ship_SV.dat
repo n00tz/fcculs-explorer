@@ -1,0 +1,5 @@
+SV|1234|0001234567||WDA1234|1|Vessel operates between coastal ports.
+Distance between consecutive ports approx. 32 miles.
+Crew holds an "inland waters" operator license.
+SV|1234|0001234567||WDA1234|2|Continuation of the above description, which FCC splits across several sequence-numbered SV rows for one vessel.
+SV|1235|0001234568||WDA5678|1|Single line description with no continuation.

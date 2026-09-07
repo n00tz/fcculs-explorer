@@ -16,6 +16,13 @@ JOIN watches w ON w.is_active
         OR (w.subject_type = 'uls_id' AND w.subject_value = ce.uls_system_id)
         OR (w.subject_type = 'frn' AND w.subject_value = ce.frn)
     )
+    -- Optional per-watch service scope. A NULL service means "any service",
+    -- so every watch created before services existed keeps matching exactly
+    -- as it did before. Events predating the service column (NULL) are only
+    -- matched by unscoped watches, which is the conservative choice: a
+    -- service-scoped watch should never fire on an event whose service is
+    -- unknown.
+    AND (w.service IS NULL OR w.service = ce.service)
 LEFT JOIN notification_deliveries nd
     ON nd.watch_id = w.id AND nd.change_event_id = ce.id
 WHERE nd.id IS NULL

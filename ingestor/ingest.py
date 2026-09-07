@@ -29,6 +29,18 @@ SUBJECT_KEY_FIELD = {
     "amat_am": "callsign",
     "tower_ra": "registration_number",
     "tower_en": "registration_number",
+    "gmrs_hd": "call_sign",
+    "gmrs_en": "call_sign",
+    "aircr_hd": "call_sign",
+    "aircr_en": "call_sign",
+    "aircr_ac": "call_sign",
+    "ship_hd": "call_sign",
+    "ship_en": "call_sign",
+    # FCC spells this column "callsign" (no underscore) in the SH record only.
+    "ship_sh": "callsign",
+    "ship_sr": "call_sign",
+    "ship_sv": "call_sign",
+    "ship_se": "call_sign",
 }
 
 SUBJECT_TYPE = {
@@ -37,6 +49,28 @@ SUBJECT_TYPE = {
     "amat_am": "amateur_license",
     "tower_ra": "tower",
     "tower_en": "tower",
+    "gmrs_hd": "gmrs_license",
+    "gmrs_en": "gmrs_license",
+    "aircr_hd": "aircraft_license",
+    "aircr_en": "aircraft_license",
+    "aircr_ac": "aircraft_license",
+    "ship_hd": "ship_license",
+    "ship_en": "ship_license",
+    "ship_sh": "ship_license",
+    "ship_sr": "ship_license",
+    "ship_sv": "ship_license",
+    "ship_se": "ship_license",
+}
+
+# Which service each table belongs to, stamped onto change_events so a watch
+# can optionally be scoped to a single service (watches.service). Derived
+# from the table prefix, which is stable by construction.
+TABLE_SERVICE = {
+    "amat": "amateur",
+    "tower": "tower",
+    "gmrs": "gmrs",
+    "aircr": "aircraft",
+    "ship": "ship",
 }
 
 # Tables carrying an FRN, and the synthetic change_events field_name emitted
@@ -46,10 +80,22 @@ SUBJECT_TYPE = {
 # diff_rows() intentionally produces no events for brand-new rows (to avoid
 # spamming "changed from nothing" for every field), so without this, a new
 # licensee's first callsign grant would never fire any change_event at all.
+#
+# Only the *_en table of each service appears here: it is the one record that
+# carries the FRN, and listing a service's other record types too would emit
+# several duplicate "new licence" events for a single grant.
 NEW_RECORD_FRN_EVENT = {
     "amat_en": "license_granted",
     "tower_en": "tower_registered",
+    "gmrs_en": "gmrs_license_granted",
+    "aircr_en": "aircraft_license_granted",
+    "ship_en": "ship_license_granted",
 }
+
+
+def service_for_table(table: str) -> Optional[str]:
+    """Map a raw table name to its service name ('amat_en' -> 'amateur')."""
+    return TABLE_SERVICE.get(table.split("_", 1)[0])
 
 
 def ingest_file(
@@ -68,6 +114,7 @@ def ingest_file(
     key_cols = record_def["key"]
     subject_field = SUBJECT_KEY_FIELD.get(table)
     subject_type = SUBJECT_TYPE.get(table)
+    service = service_for_table(table)
 
     # Fast path: no diffing (bootstrap / complete-dump load). Every row is a
     # straight upsert, so batch them with executemany instead of doing a
@@ -78,7 +125,12 @@ def ingest_file(
         written = upsert_rows_batch(
             conn,
             table,
-            parse_dat_file(path, record_def["schema"], strict=False),
+            parse_dat_file(
+                path,
+                record_def["schema"],
+                strict=False,
+                record_type=record_def.get("record_type"),
+            ),
             key_cols,
         )
         conn.commit()
@@ -89,7 +141,12 @@ def ingest_file(
     changes = 0
     inserted = 0
 
-    for record in parse_dat_file(path, record_def["schema"], strict=False):
+    for record in parse_dat_file(
+        path,
+        record_def["schema"],
+        strict=False,
+        record_type=record_def.get("record_type"),
+    ):
         rows += 1
         existing = None
         if key_cols:
@@ -131,6 +188,7 @@ def ingest_file(
                         effective_date=effective_date,
                         frn=frn,
                         is_new_operator=is_new_operator,
+                        service=service,
                     )
                     changes += 1
         elif generate_diffs and subject_field and subject_type:
@@ -146,6 +204,7 @@ def ingest_file(
                     new_value=new_value,
                     source_file=source_file,
                     effective_date=effective_date,
+                    service=service,
                 )
                 changes += 1
 

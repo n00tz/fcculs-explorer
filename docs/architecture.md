@@ -157,7 +157,7 @@ date from each file's `Last-Modified` header.
 
 ```mermaid
 flowchart TD
-    start(["Daily cron fires<br/>(default 13:30 UTC)"]) --> svc{"For each service:<br/>amateur, tower"}
+    start(["Daily cron fires<br/>(default 13:30 UTC)"]) --> svc{"For each service:<br/>amateur, tower, gmrs,<br/>aircraft, ship<br/>(or just those named<br/>by --service)"}
 
     svc --> head["HEAD all 7 weekday files"]
     head --> resolve["Resolve each file's real data date:<br/>walk back from Last-Modified to the<br/>first matching weekday"]
@@ -227,11 +227,11 @@ flowchart TD
     haschanges -->|"yes"| fieldevents["INSERT one change_event<br/>per changed field<br/>(old → new)"]
     fieldevents --> upsert
 
-    exists -->|"no — brand new"| hasfrn{"Table carries an FRN<br/>(amat_en / tower_en)<br/>and FRN is non-blank?"}
+    exists -->|"no — brand new"| hasfrn{"Table carries an FRN<br/>(any *_en table)<br/>and FRN is non-blank?"}
     hasfrn -->|"no"| upsert
     hasfrn -->|"yes"| amateur{"Table is<br/>amat_en?"}
 
-    amateur -->|"no (tower_en)"| synth["INSERT synthetic change_event<br/>field_name = tower_registered<br/>is_new_operator = false"]
+    amateur -->|"no"| synth["INSERT synthetic change_event<br/>field_name per table:<br/>tower_registered / gmrs_ /<br/>aircraft_ / ship_license_granted<br/><b>is_new_operator = false</b>"]
     amateur -->|"yes"| prior{"Does this FRN already have<br/>ANY amateur license?<br/>(checked BEFORE this upsert)"}
 
     prior -->|"yes — existing ham<br/>getting another callsign"| synth2["INSERT synthetic change_event<br/>field_name = license_granted<br/><b>is_new_operator = false</b>"]
@@ -243,7 +243,7 @@ flowchart TD
     upsert["upsert_row()"] --> nextrow
 ```
 
-**Two non-obvious rules encoded here:**
+**Three non-obvious rules encoded here:**
 
 1. **Brand-new rows produce no field-level diffs.** `diff_rows()` returns
    nothing when there is no prior row — otherwise every field would read
@@ -256,6 +256,10 @@ flowchart TD
    itself. Storing it durably (rather than deriving it live) means it can
    never retroactively flip when that person later earns a second/vanity
    callsign — the celebration is a permanent historical fact.
+3. **`is_new_operator` is structurally Amateur-only.** Only the `amat_en`
+   branch can ever set it true, so a GMRS/aircraft/ship grant cannot leak
+   into the New Hams celebration no matter how the data looks. There is
+   an explicit test asserting this for each of the three services.
 
 ---
 
@@ -490,8 +494,23 @@ erDiagram
     tower_ra ||--o{ tower_co : "antenna coords"
     tower_ra ||--o{ tower_hs : "history of"
 
+    gmrs_hd ||--o{ gmrs_hs : "history of"
+    gmrs_hd ||--|| gmrs_en : "entity for"
+    aircr_hd ||--o{ aircr_hs : "history of"
+    aircr_hd ||--|| aircr_en : "entity for"
+    aircr_hd ||--|| aircr_ac : "aircraft detail for"
+    ship_hd ||--o{ ship_hs : "history of"
+    ship_hd ||--|| ship_en : "entity for"
+    ship_hd ||--|| ship_sh : "ship station for"
+    ship_hd ||--o{ ship_sr : "radio equipment"
+    ship_hd ||--o{ ship_sv : "voyage text"
+    ship_hd ||--o{ ship_se : "exemptions"
+
     amat_en ||--o{ change_events : "generates"
     tower_en ||--o{ change_events : "generates"
+    gmrs_en ||--o{ change_events : "generates"
+    aircr_en ||--o{ change_events : "generates"
+    ship_en ||--o{ change_events : "generates"
 
     users ||--o{ notification_channels : owns
     users ||--o{ watches : owns
@@ -517,17 +536,19 @@ erDiagram
         text subject_key "callsign or ASR reg no"
         text uls_system_id
         text frn "enables FRN watches"
+        text service "amateur|tower|gmrs|aircraft|ship"
         text field_name
         text old_value
         text new_value
         date effective_date "real FCC data date"
-        bool is_new_operator "New Hams flag"
+        bool is_new_operator "New Hams flag (amateur only)"
     }
 
     watches {
         int user_id
         text subject_type "callsign|uls_id|frn|asr_registration_number"
         text subject_value
+        text service "NULL = all services"
         int channel_id
         bool is_active
     }
@@ -545,9 +566,9 @@ Materialized views (refreshed at the end of any ingest that wrote data):
 
 | View | Groups by | Powers |
 |---|---|---|
-| `identity_by_frn` | FRN | "all licenses and towers for this identity" |
+| `identity_by_frn` | FRN | "all licenses and towers for this identity" — unions all five services, so one FRN shows a person's entire FCC footprint |
 | `towers_by_site` | rounded lat/lon | "other structures at this site" |
-| `entities_by_address` | normalized mailing address | "related licensees" |
+| `entities_by_address` | normalized mailing address | "related licensees" (all five services) |
 
 ---
 
@@ -603,6 +624,17 @@ flowchart TD
 > is **already 1–6 days stale on arrival**. Skipping the `--catch-up` step
 > is the single most likely way a new instance silently starts life with a
 > data gap and an empty New Hams feed.
+
+> **Adding a service to an existing install.** `--bootstrap`, `--catch-up`
+> and `--status` all accept a repeatable `--service NAME` flag
+> (`amateur`, `tower`, `gmrs`, `aircraft`, `ship`); with none given they
+> operate on all five. This is how a running instance loads a newly added
+> dataset without re-downloading or disturbing the services it already
+> has:
+> `--bootstrap --service gmrs --service aircraft --service ship`, then
+> the same `--service` set with `--catch-up`. The new tables are unread by
+> the API until its image ships, so a partial load cannot affect what
+> users currently see.
 
 ### Diagnosing a suspected gap
 

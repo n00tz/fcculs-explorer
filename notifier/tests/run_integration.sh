@@ -26,17 +26,17 @@ for i in $(seq 1 30); do
 done
 
 echo "=== Applying migrations ==="
-podman cp /tmp/ingestor_full/002_fcc_raw_tables.sql fcculs-notifier-itest-pg:/tmp/
-podman cp /tmp/ingestor_full/001_app_tables.sql fcculs-notifier-itest-pg:/tmp/
-podman cp /tmp/ingestor_full/003_identity_grouping_views.sql fcculs-notifier-itest-pg:/tmp/
-podman cp /tmp/004_notifier_constraints.sql fcculs-notifier-itest-pg:/tmp/
-podman cp /tmp/005_frn_watch_support.sql fcculs-notifier-itest-pg:/tmp/
+# Apply every migration in db/ in numeric order rather than a hardcoded list,
+# which had already gone stale here (it stopped at 005) and would silently
+# test against an out-of-date schema.
+podman cp /tmp/db_migrations fcculs-notifier-itest-pg:/tmp/db_migrations
 podman exec fcculs-notifier-itest-pg psql -U postgres -d fcculs_test -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
-podman exec fcculs-notifier-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/002_fcc_raw_tables.sql
-podman exec fcculs-notifier-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/001_app_tables.sql
-podman exec fcculs-notifier-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/003_identity_grouping_views.sql
-podman exec fcculs-notifier-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/004_notifier_constraints.sql
-podman exec fcculs-notifier-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 -f /tmp/005_frn_watch_support.sql
+for migration in $(ls /tmp/db_migrations/*.sql | sort); do
+  name=$(basename "$migration")
+  echo "--- applying $name"
+  podman exec fcculs-notifier-itest-pg psql -U postgres -d fcculs_test -v ON_ERROR_STOP=1 \
+    -f "/tmp/db_migrations/$name"
+done
 
 echo "=== Running notifier unit + integration tests in python:3.12-slim ==="
 podman run --rm --pod fcculs-notifier-itest \

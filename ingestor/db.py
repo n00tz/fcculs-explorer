@@ -99,18 +99,19 @@ def insert_change_event(
     effective_date: date,
     frn: Optional[str] = None,
     is_new_operator: bool = False,
+    service: Optional[str] = None,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO change_events
-                (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn, is_new_operator)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn, is_new_operator, service)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (subject_type, subject_key, uls_system_id, field_name,
              str(old_value) if old_value is not None else None,
              str(new_value) if new_value is not None else None,
-             source_file, effective_date, frn or None, is_new_operator),
+             source_file, effective_date, frn or None, is_new_operator, service),
         )
 
 

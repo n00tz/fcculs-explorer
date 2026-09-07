@@ -23,6 +23,7 @@ the service — see `README.md` for that.
 - [Searching](#searching)
 - [Browsing and filtering Amateur Radio licenses](#browsing-and-filtering-amateur-radio-licenses)
 - [Browsing and filtering Tower registrations](#browsing-and-filtering-tower-registrations)
+- [Browsing GMRS, Aircraft, and Ship licenses](#browsing-gmrs-aircraft-and-ship-licenses)
 - [Sorting any table by column](#sorting-any-table-by-column)
 - [What do all these codes and abbreviations mean?](#what-do-all-these-codes-and-abbreviations-mean)
 - [Reading a detail page](#reading-a-detail-page)
@@ -37,19 +38,36 @@ the service — see `README.md` for that.
 
 ## What's in here
 
-Two FCC datasets, refreshed every day from the FCC's public ULS
+Five FCC datasets, refreshed every day from the FCC's public ULS
 transaction files:
 
 - **Amateur Radio Service** — every licensed ham radio callsign: the
   licensee's name and address, operator class (like Technician, General,
   or Amateur Extra), license status, grant/expiration dates, and (for
   club/military recreation stations) the trustee's callsign.
+- **GMRS (General Mobile Radio Service)** — licences for the walkie-talkie
+  style radios a lot of families, off-roaders and neighbourhood groups
+  use. A GMRS licence covers the person who holds it *and* their whole
+  immediate family, and unlike ham radio there's no exam. Lots of hams
+  hold a GMRS licence too — and because we group by FRN, you'll see both
+  on the same page.
+- **Aircraft radio stations (Part 87)** — radio licences for aircraft.
+  Most flying inside the US doesn't need one, but international flights
+  and some commercial operations do. These records include the aircraft's
+  **N-number** (the tail number painted on the outside), so you can look
+  a plane up by the number you can actually see.
+- **Ship radio stations (Part 80)** — radio licences for boats and ships.
+  Small recreational boats in US waters usually don't need one, but ships
+  going on international voyages do. These records include the ship's
+  name, its **MMSI** (a nine-digit number that identifies a vessel on the
+  radio, a bit like a phone number for a boat), how big it is, and what
+  radio and emergency equipment it carries.
 - **Antenna Structure Registrations ("Towers")** — every FCC-registered
   radio/antenna tower: who owns it, where it is, how tall it is, what
   kind of structure it is, its FAA study number, and when it was built or
   taken down.
 
-Both datasets carry their full **change history**, so you can see not
+Every dataset carries its full **change history**, so you can see not
 just the current state of a callsign or tower, but everything that's
 changed about it over time — like a diary of everything the FCC has
 recorded.
@@ -132,19 +150,24 @@ The home page (`/`) is a single search box. Type at least 2 characters —
 results appear automatically after a short pause, or click **Search**.
 
 You can search by:
-- **Callsign** — full or partial, e.g. `W1AW` or `W1A`
+- **Callsign** — full or partial, e.g. `W1AW` or `W1A`. This covers every
+  service at once: Amateur, GMRS, Aircraft and Ship
 - **ASR registration number** — the tower's FCC registration number
 - **Licensee or entity name** — e.g. `Sloan`
+- **N-number** — an aircraft's tail number
+- **Ship name** — e.g. `Liberty`
 
 Results are ranked with exact matches first, then close/partial matches
 (callsigns like `W1AWP`, `W1AWR` will show up under a `W1AW` search).
 Each result shows what kind of record it is (Callsign, Amateur Licensee,
-Tower Registration, Tower Entity) — click through to its detail page.
+Tower Registration, Tower Entity, GMRS, Aircraft, Ship, N-Number, Ship
+Name) — click through to its detail page.
 
 If you already know exactly what you're browsing for (all Amateur
 records in a state, all towers over a certain height, etc.) the
-**Amateur** and **Towers** browse pages (linked from the top nav) support
-much richer filtering than the home page search box — see below.
+**Amateur**, **Towers**, **GMRS**, **Aircraft** and **Ship** browse pages
+(linked from the top nav) support much richer filtering than the home
+page search box — see below.
 
 ## Browsing and filtering Amateur Radio licenses
 
@@ -188,10 +211,63 @@ displayed column is filterable, and text fields are partial matches:
 Click any registration number in the results to open its full detail
 page.
 
+## Browsing GMRS, Aircraft, and Ship licenses
+
+These three services work exactly like the Amateur page — same filters,
+same click-to-sort columns, same detail pages, same tooltips on every
+code. Pick **GMRS**, **Aircraft**, or **Ship** from the navigation.
+
+All three share these filters: **Callsign**, **Licensee name**, **City**,
+**State** and **Status** — all partial matches except Status, which is a
+dropdown. Two of them add a filter of their own:
+
+| Service | Extra filters | Why it's useful |
+|---|---|---|
+| GMRS | *(none — GMRS records have no extra fields)* | |
+| Aircraft | **N-number** | The tail number painted on the plane, so you can look up an aircraft you can actually see |
+| Ship | **Ship name**, **MMSI** | Find a boat by its name, or by the nine-digit number it identifies itself with over the radio |
+
+**GMRS** shows the callsign, licensee, location, and grant/expiry dates.
+GMRS licences last 10 years and cover the licensee's whole immediate
+family.
+
+**Aircraft** adds the **N-number** and the **Carrier** type (Private
+aircraft or Air carrier). The detail page also shows how many aircraft
+the licence covers and whether it's a portable or fleet licence.
+
+**Ship** has the most detail of any service on the site, because the FCC
+collects the most about ships. On top of the usual licence information,
+a ship's detail page can show:
+
+- **Ship station** — the ship's name, MMSI, official number, gross
+  tonnage, length, whether it makes international voyages, and its
+  working radio frequencies.
+- **Radio equipment** — a checklist of what the vessel actually carries:
+  VHF, MF and HF radios, DSC (Digital Selective Calling, which lets a
+  boat send a distress alert at the push of a button), INMARSAT satellite
+  terminals, **EPIRB** beacons (an Emergency Position-Indicating Radio
+  Beacon — it floats free and starts transmitting your position if the
+  ship sinks), **SART** search-and-rescue transponders, and how many life
+  rafts and lifeboats are aboard.
+- **Voyage / exemption details** — where the ship is registered, who owns
+  and operates it, and any exemptions it holds from carrying certain
+  equipment.
+
+Not every ship has all of these — smaller boats often just have the ship
+station section. Anything the FCC didn't record simply isn't shown.
+
+> **One thing that's Amateur-only:** the 🎉 New Hams celebration on the
+> home page. That's specifically about people earning their first ham
+> radio callsign by passing an exam, so GMRS, Aircraft and Ship licences
+> aren't included. Everything else on the site — searching, browsing,
+> sorting, detail pages, change history, identity grouping and alerts —
+> works the same for all five datasets.
+
 ## Sorting any table by column
 
-Every browse table (Amateur and Towers) lets you **click a column
-heading** to sort by that column — click **Callsign** to sort
+Every browse table (Amateur, Towers, GMRS, Aircraft and Ship) lets you
+**click a column heading** to sort by that column — click **Callsign** to
+sort
 alphabetically by callsign, click **Grant** to sort by grant date, and so
 on. Click the same heading again to flip between ascending (▲) and
 descending (▼) order. A little arrow next to the heading shows you which
@@ -215,8 +291,9 @@ anywhere one of these fields appears on the site:
 
 If you'd rather see everything explained in one place, there's a full
 **Field Definitions** reference page linked in the footer at the bottom
-of every page. It lists every coded/abbreviated field used across both
-the Amateur and Tower sections, along with every known code and what it
+of every page. It lists every coded/abbreviated field used anywhere on
+the site — Amateur, Towers, GMRS, Aircraft and Ship — along with every
+known code and what it
 means (and honestly says so on the rare occasion a code isn't officially
 documented anywhere).
 
@@ -236,7 +313,9 @@ documented anywhere).
 - **Related Identities (same FRN)**: other callsigns or tower
   registrations tied to the same FCC Registration Number (FRN) — this is
   how you discover, for example, a person's prior or additional
-  callsigns.
+  callsigns, or that the same person also holds a GMRS, aircraft or ship
+  licence. This works across all five datasets, so one FRN shows you a
+  person's entire FCC footprint in one place.
 - **Change History**: every detected field-level change (old value → new
   value) pulled from FCC's daily transaction files, with the date FCC
   says the change was effective and the date it was detected here.
@@ -309,7 +388,16 @@ Once signed in, **My Watches** lets you:
      the best option for a brand-new ham!
    - **ULS System ID** — the internal numeric ID shown on a detail page
    - **ASR Registration Number** — a tower's registration number
-3. When the daily FCC data refresh detects a change to something you're
+3. **Optionally narrow it to one service.** Every watch has a **Service**
+   selector, and the default — **All services (recommended)** — is what
+   you want almost every time. Because the FCC reuses callsign and FRN
+   formats across services, one FRN watch on "All services" will tell you
+   about your ham licence, your GMRS licence, and a boat or aircraft
+   licence under the same FRN, all at once. Only pick a specific service
+   if you deliberately want to hear about, say, GMRS changes and nothing
+   else. Watches you created before this option existed keep working
+   exactly as they did — they're already set to "All services".
+4. When the daily FCC data refresh detects a change to something you're
    watching, a notification is sent through your chosen channel(s).
 
 You can have multiple watches pointing at different channels (e.g. get a
@@ -410,11 +498,18 @@ to it. Click it, and:
 ### "Watch this" shortcuts on detail pages
 
 You don't have to go find the "Add a watch" form and type things in by
-hand every time. On any Amateur license detail page, if you're signed
-in, you'll see small **"🔔 Watch this callsign"** and **"🔔 Watch this
-FRN"** links right next to those values. Clicking one takes you straight
-to the **My Watches** page with the watch type and value already filled
-in for you — just pick a notification channel and click **Add watch**.
+hand every time. On any Amateur, GMRS, Aircraft or Ship licence detail
+page, if you're signed in, you'll see small **"🔔 Watch this callsign"**
+and **"🔔 Watch this FRN"** links right next to those values. Clicking
+one takes you straight to the **My Watches** page with the watch type and
+value already filled in for you — just pick a notification channel and
+click **Add watch**.
+
+When you click one of these from a GMRS, Aircraft or Ship page, the
+Service selector arrives pre-set to that service, since that's the page
+you were looking at. You can change it to **All services** before saving
+if you'd rather hear about everything under that callsign or FRN — which
+is usually the better choice.
 
 ## Frequently asked questions
 
@@ -433,11 +528,11 @@ automatically right along with everything else, with nothing you need
 to do.
 
 **I searched for something and got no results — is the data missing?**
-This instance only covers Amateur Radio Service and Antenna Structure
-Registration (Tower) data — no other FCC ULS services (commercial,
-GMRS, etc.) are included in v1. Double-check spelling/partial terms, or
-try the dedicated Amateur/Towers browse pages with filters instead of the
-home page search box.
+This instance covers Amateur Radio, GMRS, Aircraft (Part 87), Ship
+(Part 80), and Antenna Structure Registration (Tower) data. Other FCC ULS
+services (commercial land mobile, broadcast, microwave, etc.) aren't
+included. Double-check spelling/partial terms, or try the dedicated
+browse pages with filters instead of the home page search box.
 
 **I don't understand what a code/abbreviation on a page means — where do
 I look?**

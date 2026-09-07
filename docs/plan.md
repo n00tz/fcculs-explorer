@@ -1872,18 +1872,113 @@ can land without appearing in any Dependabot PR title), and that `rq`/
 `psycopg` must be bumped in lockstep with `notifier`, citing the skew
 found in this round.
 
+### Personal Radio Services: GMRS, Aircraft, and Ship
+
+Added three more FCC ULS datasets — **GMRS** (`ZA`), **Aircraft**
+(Part 87, `AC`), and **Ship** (Part 80, `SA`/`SB`/`SE`) — at full feature
+parity with Amateur. The explicit product goal was that users of these
+services not be second-class citizens, so everything except the New Hams
+celebration (deliberately Amateur-only) works identically: browse, sort,
+filter, detail pages, field-definition tooltips, cross-service identity
+grouping, search, watches, and notifications.
+
+**Sources were verified live, not assumed.** FCC's `complete/` and
+`daily/` directories have listings enabled, which is authoritative and
+beat guessing at filenames — `l_aircraft.zip` does not exist, the real
+name is `l_aircr.zip`, and FCC returns a **302 redirect rather than a
+404** for a missing file, so a naive existence check reports a wrong
+filename as present. Record layouts came from FCC's own Public Access
+Database Definitions DDL, cross-checked against two independent mirrors
+that diffed byte-identical, and then validated by strict-parsing every
+row of every complete dump (5,622,629 rows).
+
+**The finding that shaped the design:** `HD`, `EN` and `HS` are
+byte-identical in layout across all four license services — they are
+generic ULS record types, not Amateur-specific ones. So `schemas.py`'s
+`AMAT_*` lists were renamed `ULS_*` (aliases kept), and the 14 new tables
+are created with `LIKE amat_hd INCLUDING ALL`, making structural identity
+a schema guarantee rather than three hand-transcribed copies that drift.
+For the same reason the API and frontend are each driven by a single
+config dict (`SERVICE_CONFIGS`, `PERSONAL_SERVICES`) feeding one generic
+router and one browse/detail component pair: parity is the goal, and
+making it *structural* guarantees it. Adding a fourth service is now a
+dict entry, not new files to keep in sync. Amateur deliberately keeps its
+own module — operator class, trustee/club and New Hams don't generalize,
+and rewriting working code that serves live data would have been risk for
+a cosmetic gain.
+
+**Three real parsing hazards were found in the data, all in production
+files that would have silently corrupted rows:**
+
+1. **Embedded newlines in `SV.dat`.** 389 of its 1,068 physical lines are
+   continuations — the free-text voyage description contains bare `CR`/
+   `CRLF`. The old line-oriented parser produced 970 rows of which 291
+   were malformed; prefix-aware reassembly yields 679 correct records.
+   Applied generically to every file, since it is strictly safer.
+2. **Unescaped `|` inside free-text fields.** FCC applies no quoting at
+   all, so a typed pipe breaks that row's field count. Only 17 rows in
+   5.62M are affected and they are unparseable in principle — tolerated
+   via truncate/pad but **logged as a warning** so the damage is never
+   silent, with `validate_schema.py` given a 0.1% tolerance so this known
+   noise can't be confused with a real layout change.
+3. **Double quotes in free text** made `csv.reader` rewrite values *and*
+   re-split the newlines reassembly had just repaired. Replaced with a
+   plain `raw.split("|")`.
+
+Also: FCC splits one long `SV` description across several
+sequence-numbered rows sharing a `unique_system_identifier`, so the
+natural key must be composite — a single-column key would collapse each
+description to its last fragment on re-ingest.
+
+**Two real bugs were caught by testing that would otherwise have
+shipped:**
+
+- **The `watches` unique constraint excluded the new `service` column**,
+  which meant a user could not hold both a GMRS-scoped and an
+  Amateur-scoped watch on the same callsign and channel — making the
+  feature it was added for nearly useless. Fixed with
+  `UNIQUE NULLS NOT DISTINCT`. The `NULLS NOT DISTINCT` is essential and
+  easy to get wrong: the PostgreSQL default treats NULLs as distinct,
+  which would have silently dropped duplicate protection for *unscoped*
+  watches — the most common kind. All three behaviours were then proven
+  empirically rather than reasoned about.
+- **Both `api/tests/run_integration.sh` and
+  `notifier/tests/run_integration.sh` hardcoded stale migration lists**
+  (stopping at 006 and 005 respectively), so both suites had been quietly
+  testing against an out-of-date schema. Replaced with a sorted glob, so
+  they cannot go stale again.
+
+Testing followed the project's standard methodology throughout — real
+infrastructure in disposable containers on the production host, never
+mocks alone. Using a real schema rather than a hand-built fixture also
+caught seed data written against guessed column names, which exposed a
+genuine FCC inconsistency worth recording: `ship_sh` uses `callsign`
+while `ship_sr`/`ship_sv`/`ship_se`/`aircr_ac` all use `call_sign`.
+
+Field definitions were treated as a first-class deliverable, since
+undefined codes would produce exactly the second-class experience this
+work existed to avoid. Six of seven new coded fields were substantiated
+from FCC Form 605 and the FCC code-definitions file. One genuine negative
+result is recorded rather than papered over: `SH.working_freq_s1/s2`
+have **no published decode table anywhere** — confirmed across FCC
+documentation and ten third-party ULS parsers — so they display raw with
+a tooltip saying so. Rare junk values in `SH.general_class` (5 codes
+cover 99.997% of rows) and `special_class` are likewise left undecoded
+rather than guessed.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
 so they aren't lost or accidentally reinvented differently later:
 
-- **All other public FCC ULS service databases** beyond Amateur Radio and
-  ASR Tower (e.g. GMRS, commercial land-mobile, broadcast, aviation,
-  marine) — same daily/weekly transaction-file ingestion model this
-  project already uses, extended to more `l_*`/`r_*` dataset definitions.
-  Would reuse the existing ingestor/differ/change-event pipeline; the
-  main new work is per-service schema + parser definitions and frontend
-  browse/detail templates.
+- **All other public FCC ULS service databases** beyond the five now
+  ingested (Amateur, ASR Tower, GMRS, Aircraft, Ship) — e.g. commercial
+  land-mobile, broadcast, microwave. Same daily/weekly transaction-file
+  ingestion model this project already uses, extended to more `l_*`/`r_*`
+  dataset definitions. The GMRS/Aircraft/Ship round made this
+  substantially cheaper: adding a service is now largely a config-dict
+  entry on both the API and frontend sides rather than new hand-written
+  modules.
 - **An MCP (Model Context Protocol) server** — fully planned, not yet
   built. See "§12a. MCP Server — Planned Design (Not Yet Built)" below
   for the complete design (scope, stack, repo layout, deployment

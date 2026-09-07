@@ -129,15 +129,25 @@ understand *how* the system behaves rather than how to configure it.
 
 ## Data Sources
 
-- FCC ULS Amateur Radio Service (`l_amat`): complete weekly dump + daily
-  transaction files.
-- FCC ULS Antenna Structure Registration (ASR / "Tower", `r_tower`):
-  complete weekly dump + daily transaction files.
+| Service | Complete weekly dump | Daily transaction files | ULS service code(s) |
+|---|---|---|---|
+| Amateur Radio | `l_amat.zip` | `l_am_{day}.zip` | `HA`, `HV` |
+| Antenna Structure Registration (ASR / "Tower") | `r_tower.zip` | `r_tower_{day}.zip` | — |
+| GMRS (General Mobile Radio Service) | `l_gmrs.zip` | `l_gm_{day}.zip` | `ZA` |
+| Aircraft (Part 87) | `l_aircr.zip` | `l_ac_{day}.zip` | `AC` |
+| Ship (Part 80) | `l_ship.zip` | `l_sh_{day}.zip` | `SA`, `SB`, `SE` |
 
 All source files are free, public, and unauthenticated under FCC's public
 access program (no API key, no rate-limit registration). The ingestor
-downloads directly from `data.fcc.gov`; see `docs/plan.md` §4 for the file
-layout this project parses.
+downloads directly from `data.fcc.gov`; see `docs/fcc-data-reference.md`
+for the exact verified record layouts, per-service record types, and the
+parsing hazards found in the real data.
+
+> **Note:** the Aircraft archive is `l_aircr.zip`, *not* `l_aircraft.zip`.
+> FCC serves a `302` redirect (not a `404`) for files that don't exist, so
+> a naive existence check will report a wrong filename as present. The
+> `complete/` and `daily/` directory listings are the authoritative source
+> of truth for filenames.
 
 ## Deploying
 
@@ -196,6 +206,31 @@ Hams" feed).
 After that, the regular `ingestor` service's daily cron
 (`INGEST_CRON_HOUR`/`INGEST_CRON_MINUTE` in `.env`, default 13:30 UTC)
 keeps data current via the daily transaction files.
+
+#### Loading only some services
+
+`--bootstrap`, `--catch-up` and `--status` all accept a repeatable
+`--service` flag. With no `--service`, every service is processed, which
+is what a brand-new install wants.
+
+Naming services explicitly is for adding a dataset to an **existing**
+instance without re-loading (or risking) the data you already have:
+
+```bash
+# Add GMRS, Aircraft and Ship to an instance that already has
+# Amateur + Tower loaded, leaving that existing data untouched.
+podman compose run --rm ingestor python scheduler.py --bootstrap \
+    --service gmrs --service aircraft --service ship
+podman compose run --rm ingestor python scheduler.py --catch-up \
+    --service gmrs --service aircraft --service ship
+```
+
+Valid names are `amateur`, `tower`, `gmrs`, `aircraft`, `ship`. The same
+"both steps are required" rule above applies per service — a bootstrap
+alone leaves that service up to a week stale.
+
+Rough scale for planning: the three personal radio services add about
+5.6M rows (~1.4 GB) on top of Amateur + Tower.
 
 ### How the daily transaction files work
 

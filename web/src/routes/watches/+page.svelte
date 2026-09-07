@@ -205,14 +205,19 @@
 	let watchSubjectType = 'callsign';
 	let watchSubjectValue = '';
 	let watchChannelId = '';
+	// Optional service scope. '' means "any service", which is the default
+	// and matches how every watch behaved before the extra services existed.
+	let watchService = '';
 	let watchError = '';
 
 	function prefillWatchFromUrl() {
 		const params = $pageStore.url.searchParams;
 		const type = params.get('subject_type');
 		const value = params.get('subject_value');
+		const service = params.get('service');
 		if (type) watchSubjectType = type;
 		if (value) watchSubjectValue = value;
+		if (service) watchService = service;
 	}
 
 	async function loadAll() {
@@ -308,7 +313,10 @@
 			await post('/watches', {
 				subject_type: watchSubjectType,
 				subject_value: watchSubjectValue,
-				channel_id: Number(watchChannelId)
+				channel_id: Number(watchChannelId),
+				// Omit entirely when unscoped so the API stores NULL ("any
+				// service") rather than an empty string.
+				service: watchService || null
 			});
 			watchSubjectValue = '';
 			await loadAll();
@@ -432,12 +440,13 @@
 			<p class="muted">No watches yet.</p>
 		{:else}
 			<table>
-				<thead><tr><th>Subject</th><th>Type</th><th>Channel</th><th></th></tr></thead>
+				<thead><tr><th>Subject</th><th>Type</th><th>Service</th><th>Channel</th><th></th></tr></thead>
 				<tbody>
 					{#each watches as w}
 						<tr>
 							<td>{w.subject_value}</td>
 							<td>{w.subject_type}</td>
+							<td>{w.service ?? 'All services'}</td>
 							<td>{w.label ?? w.channel_type}</td>
 							<td><button class="danger" on:click={() => deleteWatch(w.id)}>Delete</button></td>
 						</tr>
@@ -473,6 +482,18 @@
 					placeholder={watchSubjectType === 'frn' ? 'e.g. 0012345678' : 'e.g. K0WNL'}
 					required
 				/>
+			</label>
+			<label>
+				Service (optional)
+				<span class="hint" title="Leave as 'All services' to be alerted about this callsign or FRN wherever it appears. Narrow it to one service if you only care about, say, your GMRS licence.">?</span>
+				<select bind:value={watchService}>
+					<option value="">All services (recommended)</option>
+					<option value="amateur">Amateur Radio</option>
+					<option value="gmrs">GMRS</option>
+					<option value="aircraft">Aircraft</option>
+					<option value="ship">Ship</option>
+					<option value="tower">Towers</option>
+				</select>
 			</label>
 			<label>
 				Notify via

@@ -80,5 +80,121 @@ class TestParser(unittest.TestCase):
             self.assertEqual(rows[0]["unique_system_identifier"], "123")
 
 
+class TestMultiLineAndDelimiterEdgeCases(unittest.TestCase):
+    """Regressions for two hazards found in real FCC data on 2026-09-07."""
+
+    def test_ship_sv_reassembles_records_split_across_physical_lines(self):
+        """Ship SV descriptions contain raw newlines mid-field.
+
+        In the real l_ship.zip, 389 of SV.dat's 1,068 physical lines are
+        continuations of a previous record. Splitting on newlines (as the
+        parser did before) turned 679 real records into 970 rows, 291 of
+        them malformed.
+        """
+        path = FIXTURES / "ship_SV.dat"
+        physical = [l for l in path.read_text(encoding="latin-1").splitlines() if l]
+        self.assertGreater(len(physical), 3, "fixture must contain continuation lines")
+
+        rows = list(parse_dat_file(path, schemas.SHIP_SV, strict=True))
+
+        self.assertEqual(len(rows), 3)
+        self.assertIn("\n", rows[0]["voyage_description"])
+        self.assertTrue(rows[0]["voyage_description"].startswith("Vessel operates"))
+        self.assertIn("inland waters", rows[0]["voyage_description"])
+
+    def test_double_quotes_in_free_text_are_preserved_verbatim(self):
+        """These files are raw pipe-delimited text with no quoting convention.
+
+        Real SV descriptions contain double quotes; CSV-style parsing would
+        treat a leading quote as syntax and silently rewrite the value.
+        """
+        rows = list(parse_dat_file(FIXTURES / "ship_SV.dat", schemas.SHIP_SV, strict=True))
+        self.assertIn('"inland waters"', rows[0]["voyage_description"])
+
+    def test_multi_row_descriptions_are_kept_as_separate_records(self):
+        """FCC splits one long description across sequence-numbered rows
+        sharing a unique_system_identifier; both must survive, since the
+        table's natural key is (identifier, voyage_number)."""
+        rows = list(parse_dat_file(FIXTURES / "ship_SV.dat", schemas.SHIP_SV, strict=True))
+        same_vessel = [r for r in rows if r["unique_system_identifier"] == "1234"]
+        self.assertEqual(len(same_vessel), 2)
+        self.assertEqual([r["voyage_number"] for r in same_vessel], ["1", "2"])
+
+    def test_unescaped_delimiter_in_free_text_is_tolerated_not_fatal(self):
+        """FCC does not escape '|', so a literal pipe typed into a free-text
+        field yields extra columns (17 such rows across 5.6M in the current
+        dumps, e.g. an attention line reading
+        'Director of Safety | Charter Ops Manager').
+
+        Strict mode must reject it; lenient mode (used by the ingestor) must
+        tolerate it so one bad row can't fail an entire nightly ingest.
+        """
+        bad = FIXTURES / "ship_SV_unescaped_pipe.dat"
+        bad.write_text(
+            "SV|9999|0009999999||WDA9999|1|Ops | Safety manager notes\n",
+            encoding="latin-1",
+        )
+        try:
+            with self.assertRaises(RowFieldCountMismatch):
+                list(parse_dat_file(bad, schemas.SHIP_SV, strict=True))
+
+            rows = list(parse_dat_file(bad, schemas.SHIP_SV, strict=False))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["call_sign"], "WDA9999")
+        finally:
+            bad.unlink()
+
+    def test_record_type_is_taken_from_the_last_filename_segment(self):
+        """Fixtures are named '<service>_<RECORD>.dat' while FCC ships
+        '<RECORD>.dat'; both must resolve to the same record type, or
+        continuation detection silently stops working."""
+        rows = list(parse_dat_file(FIXTURES / "ship_SV.dat", schemas.SHIP_SV, strict=True))
+        self.assertEqual(len(rows), 3)
+
+    def test_explicit_record_type_overrides_the_filename(self):
+        rows = list(parse_dat_file(
+            FIXTURES / "ship_SV.dat", schemas.SHIP_SV, strict=True, record_type="SV",
+        ))
+        self.assertEqual(len(rows), 3)
+
+
+class TestSharedULSSchemas(unittest.TestCase):
+    """HD/EN/HS are generic ULS records, identical across every service."""
+
+    def test_amateur_aliases_point_at_the_shared_definitions(self):
+        self.assertIs(schemas.AMAT_HD, schemas.ULS_HD)
+        self.assertIs(schemas.AMAT_EN, schemas.ULS_EN)
+        self.assertIs(schemas.AMAT_HS, schemas.ULS_HS)
+
+    def test_every_service_uses_the_same_hd_en_hs_layout(self):
+        for service in ("amateur", "gmrs", "aircraft", "ship"):
+            for dat in ("HD.dat", "EN.dat", "HS.dat"):
+                with self.subTest(service=service, record=dat):
+                    self.assertIs(
+                        schemas.SERVICES[service][dat]["schema"],
+                        getattr(schemas, "ULS_" + dat[:2]),
+                    )
+
+    def test_new_record_schemas_have_the_field_counts_seen_in_real_files(self):
+        # Counts confirmed by strict-parsing every row of the real complete
+        # dumps on 2026-09-07 (152,632 AC / 402,276 SH / 131,815 SR /
+        # 679 SV / 368 SE rows, zero mismatches).
+        self.assertEqual(len(schemas.AIRCR_AC), 10)
+        self.assertEqual(len(schemas.SHIP_SH), 27)
+        self.assertEqual(len(schemas.SHIP_SR), 21)
+        self.assertEqual(len(schemas.SHIP_SV), 7)
+        self.assertEqual(len(schemas.SHIP_SE), 42)
+
+    def test_gmrs_has_no_service_specific_record(self):
+        """l_gmrs.zip ships only HD/EN/HS (plus CO/LA/SC, not ingested)."""
+        self.assertEqual(set(schemas.SERVICES["gmrs"]), {"HD.dat", "EN.dat", "HS.dat"})
+
+    def test_record_type_is_derived_for_every_registered_record(self):
+        for service, record_types in schemas.SERVICES.items():
+            for filename, meta in record_types.items():
+                with self.subTest(service=service, record=filename):
+                    self.assertEqual(meta["record_type"], filename.split(".")[0].upper())
+
+
 if __name__ == "__main__":
     unittest.main()

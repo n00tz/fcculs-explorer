@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user, refreshUser, logout } from '$lib/auth.js';
+	import { PERSONAL_SERVICE_LIST } from '$lib/personalServices.js';
 
 	onMount(refreshUser);
 
@@ -17,6 +18,9 @@
 		<a class="brand" href="/">FCC ULS Explorer</a>
 		<nav>
 			<a href="/amateur">Amateur</a>
+			{#each PERSONAL_SERVICE_LIST as svc (svc.name)}
+				<a href={svc.route}>{svc.label}</a>
+			{/each}
 			<a href="/towers">Towers</a>
 			<a href="/watches">My Watches</a>
 			{#if $user}

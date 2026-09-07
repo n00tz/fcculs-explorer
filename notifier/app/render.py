@@ -11,11 +11,20 @@ _SUBJECT_KIND_LABELS = {
 # events (see ingestor/ingest.py's NEW_RECORD_FRN_EVENT) -- rendered with
 # different wording than an ordinary field-change event, since there's no
 # "old value" to speak of.
-_NEW_RECORD_FIELD_NAMES = {"license_granted", "tower_registered"}
+_NEW_RECORD_FIELD_NAMES = {
+    "license_granted",
+    "tower_registered",
+    "gmrs_license_granted",
+    "aircraft_license_granted",
+    "ship_license_granted",
+}
 
 _NEW_RECORD_DESCRIPTIONS = {
     "license_granted": "a new amateur radio callsign has been granted",
     "tower_registered": "a new tower registration has been recorded",
+    "gmrs_license_granted": "a new GMRS licence has been granted",
+    "aircraft_license_granted": "a new aircraft station licence has been granted",
+    "ship_license_granted": "a new ship station licence has been granted",
 }
 
 

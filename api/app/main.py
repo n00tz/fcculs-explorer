@@ -9,7 +9,10 @@ from .admin_auth import init_admin_password
 from .config import settings
 from .db import close_pool, open_pool
 from .ratelimit import close_redis
-from .routers import admin, amateur, auth, channels, identity, new_hams, search, towers, watches
+from .routers import (
+    admin, amateur, auth, channels, identity, new_hams, personal_services,
+    search, towers, watches,
+)
 
 
 @asynccontextmanager
@@ -50,6 +53,10 @@ app.add_middleware(
 app.include_router(search.router)
 app.include_router(amateur.router)
 app.include_router(towers.router)
+# GMRS, Aircraft and Ship: one config-driven router per service, built from
+# a shared implementation so they keep feature parity with each other.
+for _service_router in personal_services.routers:
+    app.include_router(_service_router)
 app.include_router(identity.router)
 app.include_router(new_hams.router)
 app.include_router(auth.router)

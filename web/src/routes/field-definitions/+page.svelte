@@ -34,6 +34,48 @@
 				['proposed_marking_and_lighting', 'Proposed Marking/Lighting'],
 				['county_code', 'County Code']
 			]
+		},
+		{
+			// GMRS uses only the generic ULS HD/EN records, so every field
+			// it shows is already covered by the shared section below.
+			title: 'GMRS Licenses',
+			fields: [
+				['license_status', 'Status'],
+				['radio_service_code', 'Radio Service Code'],
+				['entity_type', 'Entity Type'],
+				['applicant_type_code', 'Applicant Type']
+			]
+		},
+		{
+			title: 'Aircraft Radio Stations (Part 87)',
+			fields: [
+				['n_number', 'N-Number (tail number)'],
+				['type_of_carrier', 'Type of Carrier'],
+				['portable_indicator', 'Portable Indicator'],
+				['fleet_indicator', 'Fleet Indicator'],
+				['aircraft_count', 'Aircraft Count']
+			]
+		},
+		{
+			title: 'Ship Radio Stations (Part 80)',
+			fields: [
+				['type_of_authorization', 'Type of Authorization'],
+				['general_class', 'General Class'],
+				['special_class', 'Special Class'],
+				['station_number', 'MMSI Number'],
+				['ship_number', 'Official Number of Ship'],
+				['ship_name', 'Ship Name'],
+				['gross_tonnage', 'Gross Tonnage'],
+				['ship_length', 'Ship Length'],
+				['international_voyages', 'International Voyages'],
+				['foreign_communications', 'Foreign Communications'],
+				['radiotelegraph', 'Radiotelegraph Working Series'],
+				['self_id_number', 'Sel Call Number'],
+				['comsat_id_number', 'Sel Call — INMARSAT'],
+				['working_freq_s1', 'Working Frequency'],
+				['ship_type', 'Ship Type (exemption request)'],
+				['voyage_description', 'Voyage Description']
+			]
 		}
 	];
 
@@ -42,7 +84,16 @@
 	// the detail pages for the authoritative pairing).
 	const CATEGORY_OVERRIDES = {
 		status_code: 'status_code_tower',
-		previous_purpose: 'application_purpose'
+		previous_purpose: 'application_purpose',
+		// Ship class codes live under ship_-prefixed categories to avoid
+		// colliding with other services' generic "class" fields.
+		general_class: 'ship_general_class',
+		special_class: 'ship_special_class',
+		// Simple Y/N indicator fields all share one decode table.
+		portable_indicator: 'yes_no',
+		fleet_indicator: 'yes_no',
+		international_voyages: 'yes_no',
+		foreign_communications: 'yes_no'
 	};
 
 	function categoryFor(key) {

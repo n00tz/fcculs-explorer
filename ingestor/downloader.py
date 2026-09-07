@@ -32,11 +32,22 @@ BASE_URL = "https://data.fcc.gov/download/pub/uls"
 COMPLETE_FILES = {
     "amateur": "l_amat.zip",
     "tower": "r_tower.zip",
+    "gmrs": "l_gmrs.zip",
+    # NOTE: the Aircraft file is "l_aircr.zip", NOT "l_aircraft.zip". FCC
+    # answers a request for a non-existent file with a 302 redirect to an
+    # error page rather than a 404, so a naive "is it there?" check that
+    # only looks for 404 will wrongly report the wrong name as valid. Both
+    # names below were confirmed against FCC's browsable directory index.
+    "aircraft": "l_aircr.zip",
+    "ship": "l_ship.zip",
 }
 
 DAILY_PREFIXES = {
     "amateur": "l_am",
     "tower": "r_tow",
+    "gmrs": "l_gm",
+    "aircraft": "l_ac",
+    "ship": "l_sh",
 }
 
 DAYS_OF_WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]

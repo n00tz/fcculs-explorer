@@ -150,10 +150,13 @@ class TestRunDailyJobCatchUp(unittest.TestCase):
         ]
         m["ingested"].return_value = {datetime.date(2026, 9, 3)}
 
-        scheduler.run_daily_job(run_date=datetime.date(2026, 9, 7))
+        scheduler.run_daily_job(run_date=datetime.date(2026, 9, 7),
+                                services=["amateur", "tower"])
 
         ingested_dates = [c.kwargs["data_date"] for c in m["record"].call_args_list]
         # Two services x two pending days each, and never the already-done day.
+        # Services are pinned explicitly so this stays deterministic as more
+        # services are added to SERVICES.
         self.assertNotIn(datetime.date(2026, 9, 3), ingested_dates)
         self.assertEqual(
             ingested_dates,
@@ -203,12 +206,13 @@ class TestRunDailyJobCatchUp(unittest.TestCase):
         m["ingested"].return_value = set()
         m["extract"].side_effect = lambda content, dest_dir: []  # nothing in archive
 
-        result = scheduler.run_daily_job(run_date=datetime.date(2026, 9, 7))
+        result = scheduler.run_daily_job(run_date=datetime.date(2026, 9, 7),
+                                         services=["amateur", "tower"])
 
         m["ingest"].assert_not_called()
         self.assertEqual(result, {})
         # The day is still recorded, so an empty/holiday archive isn't retried forever.
-        self.assertEqual(m["record"].call_count, 2)  # one per service
+        self.assertEqual(m["record"].call_count, 2)  # one per pinned service
 
     def test_records_run_metadata_for_dedupe(self):
         m = self._patch_common()
@@ -223,6 +227,36 @@ class TestRunDailyJobCatchUp(unittest.TestCase):
         self.assertEqual(call.kwargs["last_modified"], _utc(2026, 9, 6))
         # sha256 of the downloaded bytes, so a re-published file is detectable.
         self.assertEqual(len(call.kwargs["content_sha256"]), 64)
+
+
+class TestResolveServices(unittest.TestCase):
+    """--service selection: the mechanism that lets a new service be
+    bootstrapped on a live deployment without re-loading data already
+    serving traffic."""
+
+    def test_no_selection_means_every_service(self):
+        self.assertEqual(
+            set(scheduler.resolve_services(None)), set(scheduler.SERVICES)
+        )
+        self.assertEqual(
+            set(scheduler.resolve_services([])), set(scheduler.SERVICES)
+        )
+
+    def test_selection_is_limited_to_named_services(self):
+        selected = scheduler.resolve_services(["gmrs", "ship"])
+        self.assertEqual(set(selected), {"gmrs", "ship"})
+        # The record-type maps must be the real ones, not copies/stubs.
+        self.assertIs(selected["gmrs"], scheduler.SERVICES["gmrs"])
+
+    def test_unknown_service_fails_loudly(self):
+        """A typo must not silently ingest nothing and look like success."""
+        with self.assertRaises(SystemExit) as ctx:
+            scheduler.resolve_services(["gmrs", "typo"])
+        self.assertIn("typo", str(ctx.exception))
+
+    def test_all_new_personal_radio_services_are_registered(self):
+        for name in ("gmrs", "aircraft", "ship"):
+            self.assertIn(name, scheduler.SERVICES)
 
 
 if __name__ == "__main__":
