@@ -7,6 +7,7 @@
 set -euo pipefail
 
 TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
+PLAIN_UNIT_TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 REMOVE_VOLUMES=0
 REMOVE_IMAGES=0
@@ -24,6 +25,7 @@ UNITS=(
   fcculs-ingestor
   fcculs-notifier-worker
   fcculs-notifier-dispatch
+  fcculs-backup
   fcculs-bootstrap
   fcculs-migrate
   fcculs-redis
@@ -32,6 +34,9 @@ UNITS=(
   pgdata-volume
   redisdata-volume
 )
+
+echo "Disabling timers..."
+systemctl --user disable --now fcculs-backup.timer 2>/dev/null && echo "  disabled fcculs-backup.timer" || true
 
 echo "Stopping units..."
 for name in "${UNITS[@]}"; do
@@ -45,6 +50,11 @@ for f in fcculs.network pgdata.volume redisdata.volume \
          fcculs-notifier-worker.container fcculs-notifier-dispatch.container \
          fcculs-web.container; do
   rm -f "$TARGET_DIR/$f" && echo "  removed $f"
+done
+
+echo "Removing unit files from $PLAIN_UNIT_TARGET_DIR..."
+for f in fcculs-backup.service fcculs-backup.timer; do
+  rm -f "$PLAIN_UNIT_TARGET_DIR/$f" && echo "  removed $f"
 done
 
 systemctl --user daemon-reload

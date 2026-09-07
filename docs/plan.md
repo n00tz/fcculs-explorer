@@ -1122,6 +1122,87 @@ commands for a given test run are chained into a single SSH invocation.
   confirmed `/api/search` returned 200 again — proving the fixed window
   resets rather than permanently banning the client.
 
+- ✅ `postgres-backup-restore` — done. There was no backup mechanism at
+  all for the fcculs Postgres volume (`pgdata.volume`) — the ingested
+  FCC data (amateur/tower tables) is fully re-downloadable, but
+  `users`, `watches`, and `notification_channels` (which can contain
+  webhook URLs/tokens) exist only in that one database, so a disk
+  failure would have lost them permanently with no recovery path.
+
+  Added `deploy/backup.sh`: runs `podman exec <postgres-container>
+  pg_dump ...` (note: the actual container name is `postgres`, per
+  `quadlet/fcculs-postgres.container`'s `ContainerName=postgres` and
+  `compose.yaml`'s service name — only the *systemd unit* is named
+  `fcculs-postgres.service` — the script defaults to `postgres` but is
+  overridable via `FCCULS_BACKUP_POSTGRES_CONTAINER` in case an
+  operator renamed it), gzip-compresses the dump to a timestamped file
+  in a configurable output directory (`BACKUP_DIR` in `.env`, default
+  `~/fcculs-backups`; per-run override `FCCULS_BACKUP_DIR`), writes to
+  a `.tmp` path and renames on success (so a killed run never leaves a
+  half-written file at the final name), and prunes dumps older than a
+  configurable retention period (`BACKUP_RETENTION_DAYS` in `.env`,
+  **default 3 days** per explicit instruction). Added
+  `deploy/restore.sh`, which restores a dump file into a running
+  Postgres container; guarded behind a required `--confirm` flag since
+  it drops and recreates the target database's schema before loading
+  (refuses to run without it, printing what it would do instead), and
+  supports `--db-name NAME` to restore into a disposable side-by-side
+  database instead of the live one — the recommended way to actually
+  verify a backup is restorable without ever touching production data.
+
+  Added a Quadlet-adjacent daily timer, `quadlet/fcculs-backup.timer` +
+  `quadlet/fcculs-backup.service`, that runs `deploy/backup.sh` once a
+  day. Non-obvious wrinkle discovered while wiring this up: Podman's
+  Quadlet generator only transforms `.container`/`.volume`/`.network`/
+  `.kube`/`.pod` files placed in `~/.config/containers/systemd/` — a
+  plain `.service`/`.timer` file dropped in that same directory is
+  silently ignored (never becomes a real systemd unit at all, not even
+  an error). Fixed by having `deploy/install-quadlets.sh` route
+  `*.service`/`*.timer` templates to the normal user unit directory
+  (`~/.config/systemd/user/`) instead, while still keeping the template
+  files themselves in `quadlet/` for naming/discoverability consistency
+  with the `*.container` files, and having `install-quadlets.sh` run
+  `systemctl --user enable --now fcculs-backup.timer` so it's scheduled
+  immediately on a fresh install (`uninstall-quadlets.sh` updated to
+  disable/remove it from the correct directory too). Second wrinkle:
+  systemd's `ExecStart=` execs `deploy/backup.sh` directly (unlike this
+  repo's other `deploy/*.sh` scripts, which are always invoked via
+  `bash deploy/foo.sh` and so never needed the executable bit) — but
+  git does not track/preserve the executable bit, so a fresh clone's
+  copy lacks it and the unit fails with `203/EXEC`. Fixed by having
+  `install-quadlets.sh` `chmod +x` `backup.sh`/`restore.sh` on every
+  run, so this is handled automatically rather than requiring a manual
+  step documented somewhere users won't read. Documented both scripts
+  and the timer in README's "Running with Podman Quadlets" section (new
+  "Backups" subsection) and added `BACKUP_DIR`/`BACKUP_RETENTION_DAYS`
+  to the Configuration Reference table.
+
+  Tested for real on `fcculs@10.64.3.39` (not just unit-level): ran
+  `deploy/backup.sh` directly and confirmed it produced a real,
+  non-empty 227MB gzip dump. Ran `deploy/restore.sh --confirm --db-name
+  fcculs_restore_test <dump>` and confirmed it restored successfully
+  (schema + data, including a `REFRESH MATERIALIZED VIEW` step for the
+  identity-grouping views) into a disposable side-by-side database,
+  then diffed row counts against the live database for `amat_en`,
+  `tower_en`, `users`, `watches`, and `change_events` — all matched
+  exactly except `amat_en` (1,694,652 restored vs. 1,694,648 live),
+  attributable to a few rows ingested by the always-running `ingestor`
+  service in the time between the backup and the comparison query, not
+  a restore defect. Dropped the disposable test database afterward.
+  Separately confirmed `restore.sh` refuses to run without `--confirm`
+  (dry-run output only, non-zero exit) and that `backup.sh` fails
+  loudly (non-zero exit, clear error) against a deliberately wrong
+  container name. Ran `deploy/install-quadlets.sh` for real, confirmed
+  `fcculs-backup.timer`/`fcculs-backup.service` were correctly rendered
+  into `~/.config/systemd/user/` (not the Quadlet directory), the timer
+  was enabled and scheduled (`systemctl --user list-timers`), and a
+  manual `systemctl --user start fcculs-backup.service` completed
+  successfully end-to-end through systemd (not just via a direct `bash`
+  invocation) after the executable-bit fix. Deleted the two
+  test-generated dump files from `~/fcculs-backups` afterward so only
+  the timer's real future daily runs will populate that directory going
+  forward.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

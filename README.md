@@ -227,6 +227,49 @@ whatever's checked out, e.g. to test an uncommitted change), `--no-restart`
 `:latest` and restart that unit (the script prints the exact command at the
 end of a run).
 
+### Backups
+
+`fcculs-backup.timer` (installed by `deploy/install-quadlets.sh` alongside
+the other units, and enabled/started automatically) runs
+`deploy/backup.sh` once a day: it `pg_dump`s the live database via `podman
+exec` (no direct DB port exposure needed) to a timestamped,
+gzip-compressed file in `BACKUP_DIR` (`.env`, default `~/fcculs-backups`),
+then deletes any existing dump older than `BACKUP_RETENTION_DAYS` (`.env`,
+default 3 days). This matters because `users`, `watches`, and
+`notification_channels` (which can contain webhook URLs/tokens) exist only
+in this database — unlike the ingested amateur/tower data, which can always
+be re-downloaded from the FCC.
+
+```bash
+systemctl --user list-timers fcculs-backup.timer   # next/last run time
+systemctl --user start fcculs-backup.service       # run a backup right now
+journalctl --user -u fcculs-backup.service -f      # watch a run
+ls -lh ~/fcculs-backups                            # list dumps
+```
+
+To restore a dump (e.g. after a disk failure, or just to verify a backup
+is actually good), use `deploy/restore.sh`. It requires an explicit
+`--confirm` flag since it's destructive (drops and recreates the target
+database's schema before loading):
+
+```bash
+# Verify a backup without touching the live database: restore into a
+# disposable side-by-side database instead.
+bash deploy/restore.sh --confirm --db-name fcculs_restore_test \
+  ~/fcculs-backups/fcculs-fcculs-20240101-120000.sql.gz
+
+# Restore over the actual live database (only after downtime/data loss):
+bash deploy/restore.sh --confirm ~/fcculs-backups/fcculs-fcculs-20240101-120000.sql.gz
+```
+
+Also works outside Quadlets/Compose entirely — both scripts only need
+`podman` and a running `postgres`/`fcculs-postgres` container, so they
+work the same way against either deployment path (Compose's `postgres`
+service is named the same way, so no flags are needed there either). Not
+installed by the Compose path automatically — run `deploy/backup.sh`
+yourself via any scheduler (host `cron`, etc.) if you're on Compose rather
+than Quadlets.
+
 ### Uninstall
 
 ```bash
@@ -265,6 +308,8 @@ just re-run `deploy/install-quadlets.sh`.
 | `INGEST_CRON_HOUR`, `INGEST_CRON_MINUTE` | ingestor | UTC time of the daily ingest job |
 | `MAX_DELIVERY_ATTEMPTS` | notifier | Retry cap per notification delivery |
 | `DISPATCH_INTERVAL_SECONDS` | notifier-dispatch | Polling interval for matching new `change_events` to watches |
+| `BACKUP_DIR` | deploy/backup.sh, fcculs-backup.timer | Host directory daily `pg_dump` backups are written to (default `~/fcculs-backups`); override per-run with `FCCULS_BACKUP_DIR` |
+| `BACKUP_RETENTION_DAYS` | deploy/backup.sh, fcculs-backup.timer | Backups older than this are deleted on every backup run (default 3 days); override per-run with `FCCULS_BACKUP_RETENTION_DAYS` |
 
 Per-watch notification channels (SMTP address, email-to-SMS carrier
 gateway, or webhook URL/template — including ntfy/Discord/Telegram/Matrix

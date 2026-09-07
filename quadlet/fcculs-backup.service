@@ -1,0 +1,20 @@
+# Plain (non-Quadlet-managed-container) systemd oneshot unit that runs
+# deploy/backup.sh on the host to pg_dump the fcculs Postgres database via
+# `podman exec`. Placed alongside the *.container Quadlets so
+# install-quadlets.sh's existing "render every template file in quadlet/"
+# loop picks it up automatically; Podman's Quadlet generator passes plain
+# .service/.timer files through unchanged (it only transforms
+# .container/.volume/.network/.kube/.pod files), so this becomes a normal
+# systemd --user unit once installed.
+#
+# Not started directly -- fcculs-backup.timer triggers it daily. Safe to
+# also run manually any time: `systemctl --user start fcculs-backup.service`.
+[Unit]
+Description=FCC ULS Explorer database backup (pg_dump via podman exec)
+After=fcculs-postgres.service
+Wants=fcculs-postgres.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%REPO_DIR%
+ExecStart=%REPO_DIR%/deploy/backup.sh

@@ -13,6 +13,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE_DIR="$REPO_DIR/quadlet"
 TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
+# Plain systemd units (fcculs-backup.service/.timer) are NOT Quadlet files
+# (no .container/.volume/.network/.kube/.pod extension) -- Podman's Quadlet
+# generator only looks at TARGET_DIR for those five extensions and ignores
+# everything else there, so a plain .service/.timer placed in TARGET_DIR is
+# silently never turned into a real unit. They're kept in quadlet/ anyway
+# for naming/discoverability consistency with the *.container templates,
+# but installed into the regular user systemd unit directory instead.
+PLAIN_UNIT_TARGET_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 ENV_FILE="$REPO_DIR/.env"
 
 echo "Repo:       $REPO_DIR"
@@ -79,7 +87,7 @@ for required in POSTGRES_PASSWORD SESSION_SECRET; do
 done
 
 # --- Render templates -> target dir ---
-mkdir -p "$TARGET_DIR"
+mkdir -p "$TARGET_DIR" "$PLAIN_UNIT_TARGET_DIR"
 
 render() { # render <template-file> <output-file>
   local src="$1" dst="$2" content
@@ -115,9 +123,22 @@ render() { # render <template-file> <output-file>
 }
 
 for tmpl in "$TEMPLATE_DIR"/*; do
-  render "$tmpl" "$TARGET_DIR/$(basename "$tmpl")"
-  echo "rendered $(basename "$tmpl")"
+  base="$(basename "$tmpl")"
+  case "$base" in
+    *.service|*.timer) dest_dir="$PLAIN_UNIT_TARGET_DIR" ;;
+    *)                 dest_dir="$TARGET_DIR" ;;
+  esac
+  render "$tmpl" "$dest_dir/$base"
+  echo "rendered $base -> $dest_dir/"
 done
+
+# fcculs-backup.service's ExecStart= invokes deploy/backup.sh directly
+# (not via `bash deploy/backup.sh`), so systemd needs the execute bit set
+# on it -- git does not track/preserve the executable bit (this repo's
+# other deploy/*.sh scripts are all invoked as `bash deploy/foo.sh`, so
+# this has never mattered before now). Set it here so a fresh clone works
+# without a manual `chmod`.
+chmod +x "$REPO_DIR/deploy/backup.sh" "$REPO_DIR/deploy/restore.sh"
 
 # --- Reload systemd, which auto-generates native units from Quadlets ---
 systemctl --user daemon-reload
@@ -145,6 +166,11 @@ systemctl --user start fcculs-api.service fcculs-ingestor.service \
                        fcculs-notifier-worker.service fcculs-notifier-dispatch.service
 systemctl --user start fcculs-web.service
 
+# Daily Postgres backup timer -- enable (idempotent) so it survives a
+# `daemon-reload`/re-render and actually gets scheduled, and start it now
+# so it's active without waiting for the next `systemctl --user enable`.
+systemctl --user enable --now fcculs-backup.timer
+
 # fcculs-bootstrap.service is intentionally NOT started here -- it is a
 # manual-start oneshot for the first-time full data load:
 #     systemctl --user start fcculs-bootstrap.service
@@ -152,5 +178,7 @@ systemctl --user start fcculs-web.service
 echo ""
 echo "Done. Status:  systemctl --user status fcculs-api.service  (etc.)"
 echo "Logs:          journalctl --user -u fcculs-api.service -f  (etc.)"
+echo "Backups:       systemctl --user list-timers fcculs-backup.timer"
+echo "               systemctl --user start fcculs-backup.service   # run one now"
 echo "One-time full data load on a fresh database:"
 echo "               systemctl --user start fcculs-bootstrap.service"

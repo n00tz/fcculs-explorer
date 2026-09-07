@@ -1,0 +1,16 @@
+# Daily timer for fcculs-backup.service. See that unit and
+# deploy/backup.sh for what actually runs.
+[Unit]
+Description=Daily FCC ULS Explorer database backup
+
+[Timer]
+OnCalendar=daily
+# Run a missed backup on next boot/login if the host was off at the
+# scheduled time (rootless user units only run while the user session/
+# linger is active).
+Persistent=true
+# Spread load slightly if multiple units land on the same OnCalendar tick.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
