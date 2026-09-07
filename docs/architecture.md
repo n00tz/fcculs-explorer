@@ -21,15 +21,16 @@ sync with the source. Edit the code blocks directly.
 - [8. Passwordless authentication](#8-passwordless-authentication)
 - [9. Test-send](#9-test-send)
 - [10. Read-request lifecycle](#10-read-request-lifecycle)
-- [11. Data model](#11-data-model)
-- [12. Deployment: update.sh](#12-deployment-updatesh)
-- [13. Operational runbook](#13-operational-runbook) — install & recovery
+- [11. MCP server](#11-mcp-server) — LLM/agent access
+- [12. Data model](#12-data-model)
+- [13. Deployment: update.sh](#13-deployment-updatesh)
+- [14. Operational runbook](#14-operational-runbook) — install & recovery
 
 ---
 
 ## 1. System topology
 
-Nine containers on one rootless Podman host, on a single internal network
+Ten containers on one rootless Podman host, on a single internal network
 (`fcculs`). **Only `web` publishes a host port** — everything else is
 reachable only from inside the network, by container DNS name.
 
@@ -37,6 +38,7 @@ reachable only from inside the network, by container DNS name.
 flowchart TB
     subgraph outside["Outside world"]
         user["Browser"]
+        agent["MCP client<br/>(LLM / agent)"]
         fcc["data.fcc.gov<br/>ULS public files"]
         smtp["SMTP relay"]
         hooks["ntfy / Discord / Telegram<br/>Matrix / generic webhook"]
@@ -48,6 +50,7 @@ flowchart TB
         subgraph net["network: fcculs"]
             web["<b>web</b><br/>Caddy + SvelteKit static build<br/>:8080 (published)"]
             api["<b>api</b><br/>FastAPI + uvicorn<br/>:8000"]
+            mcp["<b>mcp</b><br/>MCP server (streamable HTTP)<br/>:8080"]
             ingestor["<b>ingestor</b><br/>APScheduler daily job"]
             dispatch["<b>notifier-dispatch</b><br/>match loop"]
             worker["<b>notifier-worker</b><br/>RQ consumer"]
@@ -64,7 +67,10 @@ flowchart TB
     end
 
     user --> cf --> web
+    agent --> cf
     web -->|"/api/*"| api
+    web -->|"/mcp*"| mcp
+    mcp -->|"REST over<br/>internal network"| api
     web -->|"everything else:<br/>static SPA"| web
 
     api --> pg
@@ -206,7 +212,7 @@ flowchart TD
 
 > **Hard limit:** FCC keeps only 7 rotating files. A gap longer than that
 > is **unrecoverable from the daily feed** — it needs a fresh
-> `--bootstrap`. See [§13](#13-operational-runbook).
+> `--bootstrap`. See [§14](#14-operational-runbook).
 
 ---
 
@@ -541,19 +547,121 @@ flowchart TD
     query["Query Postgres<br/>via async pool"] --> resp["JSON response"]
 ```
 
-**Known asymmetry in detail-endpoint limiting.** The GMRS, Aircraft and
-Ship routers rate-limit *both* their browse and detail endpoints
-(`personal_services.py` calls `enforce_rate_limit` in each), because they
-were written after the read-endpoint hardening pass. The older
+**Detail-endpoint limiting is now uniform.** Every public read endpoint —
+browse *and* detail, across Amateur, Tower, GMRS, Aircraft and Ship —
+calls `enforce_rate_limit` on the shared search tier
+(`RATE_LIMIT_SEARCH_MAX` per `RATE_LIMIT_SEARCH_WINDOW_SECONDS`, default
+60/60s, keyed per client IP in Redis). The older
 `GET /api/amateur/{call_sign}` and `GET /api/towers/{registration_number}`
-detail endpoints limit only browse, so their detail lookups are currently
-unthrottled. This is tracked as the `mcp-detail-endpoint-rate-limit` todo
-in `docs/plan.md` and should be closed before any unauthenticated MCP tool
-surface exposes those two endpoints.
+endpoints were the last gap and were closed as a prerequisite for the MCP
+server, since MCP tool calls reach those same endpoints unauthenticated.
+
+Because the MCP server calls the API over the internal network, **every
+MCP tool call is limited by the same counter as a browser request** — the
+MCP layer adds no limiting of its own and needs none. Note the practical
+consequence: all MCP traffic shares one client IP (the `mcp` container's),
+so heavy agent use is throttled as a single client rather than per end
+user.
 
 ---
 
-## 11. Data model
+## 11. MCP server
+
+The `mcp` container exposes the same read-only data to LLM clients and
+agents over the Model Context Protocol, so a tool like Claude Desktop or
+Copilot CLI can answer questions about FCC licence data directly.
+
+**It contains no database access at all.** It is a protocol adapter: it
+translates MCP tool calls into REST calls against the existing `api`
+container and reshapes the JSON responses. That is deliberate — it means
+query logic, validation, rate limiting and connection pooling exist in
+exactly one place, and the MCP surface cannot drift from what the website
+shows.
+
+```mermaid
+sequenceDiagram
+    participant C as MCP client (LLM)
+    participant CF as Cloudflare Tunnel
+    participant W as web (Caddy)
+    participant M as mcp
+    participant A as api
+    participant R as redis
+    participant P as postgres
+
+    C->>CF: POST /mcp (initialize)
+    CF->>W: X-Forwarded-Proto: https
+    W->>M: proxy, scheme re-asserted
+    M-->>C: tool catalog + instructions
+
+    C->>M: tools/call get_license(amateur, W1AW)
+    Note over M: validate args against<br/>the derived JSON schema
+    M->>A: GET /api/amateur/W1AW
+    A->>R: rate-limit check (per client IP)
+    A->>P: query
+    P-->>A: rows
+    A-->>M: 200 JSON
+    M-->>C: structured tool result
+
+    C->>M: tools/call get_license(amateur, ZZ9ZZZ)
+    M->>A: GET /api/amateur/ZZ9ZZZ
+    A-->>M: 404
+    Note over M: a 404 is normal usage,<br/>not a protocol failure
+    M-->>C: {"error": ..., "status_code": 404}
+```
+
+### The eleven tools
+
+| Tool | Backing endpoint |
+|---|---|
+| `search_uls` | `GET /api/search` |
+| `browse_licenses(service=…)` | `/api/amateur`, `/api/gmrs`, `/api/aircraft`, `/api/ship` |
+| `get_license(service=…, call_sign=…)` | the matching detail endpoint |
+| `browse_towers` / `get_tower` | `/api/towers[/{n}]` |
+| `get_identity_by_frn` | `GET /api/identity/frn/{frn}` |
+| `get_identity_by_address` | `GET /api/identity/address` |
+| `get_change_history` | `GET /api/history` |
+| `get_new_hams` | `GET /api/new-hams` |
+| `describe_code` | `GET /api/field-definitions/describe` |
+| `list_field_definitions` | `GET /api/field-definitions` |
+
+Browse and detail are unified across the four licence services behind a
+single `service` enum rather than one tool per service. Eleven tools
+describe the whole dataset instead of twenty-odd near-duplicates, which
+keeps the catalog small enough for a model to reason about — and the enum
+makes the valid values self-documenting.
+
+**Service-specific filters are routed, not merged.** `operator_class` is
+Amateur-only, `n_number` Aircraft-only, `ship_name`/`mmsi` Ship-only. The
+API rejects unknown query parameters, so forwarding an aircraft filter to
+the GMRS endpoint would turn an ignorable argument into a hard failure.
+The tool layer drops filters that don't apply to the chosen service.
+
+### Two failure modes worth knowing
+
+Both are silent from inside the network and only appear when testing
+through the real public hostname:
+
+1. **DNS-rebinding protection returning `421`.** The SDK arms a localhost
+   allowlist if you pass no transport-security settings, and rejects
+   everything if you pass a bare `TransportSecuritySettings()`. Both
+   implicit paths are wrong behind a proxy, so the setting is configured
+   explicitly.
+2. **Protocol-downgrade redirect.** The SDK mounts at `/mcp` and redirects
+   `/mcp/` → `/mcp`. Cloudflare terminates TLS and reaches Caddy over plain
+   HTTP, so unless the real scheme is re-asserted, that redirect is emitted
+   as `http://` and clients refuse to follow it. See the comments in
+   `web/Caddyfile`.
+
+### Page sizes
+
+`MCP_DEFAULT_PAGE_SIZE` (10) and `MCP_MAX_PAGE_SIZE` (50) are deliberately
+smaller than the website's 25/100. Tool results are consumed by a model
+with a finite context window, where a large page is actively harmful
+rather than merely slow.
+
+---
+
+## 12. Data model
 
 Three groups: **FCC raw tables** (mirror the public files), **application
 tables** (users, watches, delivery), and **derived objects** (materialized
@@ -647,7 +755,7 @@ Materialized views (refreshed at the end of any ingest that wrote data):
 
 ---
 
-## 12. Deployment: update.sh
+## 13. Deployment: update.sh
 
 ```mermaid
 flowchart TD
@@ -658,7 +766,7 @@ flowchart TD
 
     rev --> force{"--force?"}
     force -->|"yes"| build
-    force -->|"no"| check["Read org.opencontainers.image.revision<br/>label from <b>all four</b> images:<br/>api, ingestor, notifier, web"]
+    force -->|"no"| check["Read org.opencontainers.image.revision<br/>label from <b>all five</b> images:<br/>api, ingestor, notifier, mcp, web"]
 
     check --> allmatch{"Every image<br/>labelled with rev?"}
     allmatch -->|"yes"| skip(["Already up to date.<br/>Nothing to do."])
@@ -672,7 +780,7 @@ flowchart TD
     units --> verify(["Verify: curl / and /api/healthz"])
 ```
 
-**Why all four labels are checked.** Images build sequentially, so a
+**Why all five labels are checked.** Images build sequentially, so a
 failure partway through can leave `api` correctly labelled while `web` is
 stale. Checking only `api` (the original behaviour) made a retry report
 "Already up to date" and leave a never-successfully-built image in place
@@ -680,7 +788,7 @@ indefinitely. See `docs/plan.md`'s Progress Log.
 
 ---
 
-## 13. Operational runbook
+## 14. Operational runbook
 
 ### Fresh install
 

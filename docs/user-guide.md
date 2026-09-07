@@ -34,6 +34,7 @@ the service — see `README.md` for that.
   - [Notification channel types, explained](#notification-channel-types-explained)
   - [Testing a channel before you rely on it](#testing-a-channel-before-you-rely-on-it)
   - ["Watch this" shortcuts on detail pages](#watch-this-shortcuts-on-detail-pages)
+- [Using this site with an AI assistant](#using-this-site-with-an-ai-assistant)
 - [Frequently asked questions](#frequently-asked-questions)
 
 ## What's in here
@@ -530,6 +531,54 @@ Service selector arrives pre-set to that service, since that's the page
 you were looking at. You can change it to **All services** before saving
 if you'd rather hear about everything under that callsign or FRN — which
 is usually the better choice.
+
+## Using this site with an AI assistant
+
+If you use an AI assistant that supports **MCP** (the Model Context
+Protocol) — Claude Desktop, Copilot CLI, and a growing number of others —
+you can connect it to this site and just *ask* your questions in plain
+English instead of clicking through tables.
+
+Point your assistant at:
+
+```
+https://fcculs-explorer.n00tz.net/mcp
+```
+
+Exactly where you paste that depends on your assistant; look for a
+setting called "MCP servers", "connectors", or "custom tools", and choose
+the option for a **remote** or **HTTP** server (not a local/command one).
+
+Once connected, you can ask things like:
+
+- "What's the license status for W1AW, and when does it expire?"
+- "How many active amateur licenses are there in Georgia?"
+- "Show me everything the FCC has under FRN 0004511143."
+- "What does operator class 'E' mean?"
+- "Has anything changed on my callsign in the last month?"
+- "Who are the newest hams licensed this week?"
+
+Some things worth knowing:
+
+- **It can only read.** The assistant can look things up, but it cannot
+  create watches, change notification settings, or edit any data. Watches
+  are still set up by you, signed in, on the **My Watches** page.
+- **It only sees public data** — exactly the same information any visitor
+  can already browse on this site. Nothing private is exposed.
+- **It doesn't need an account or a password.** There's nothing to sign
+  in to and no key to paste.
+- **Answers come back in small batches.** Assistants have a limited
+  amount they can read at once, so a question matching thousands of
+  licenses returns the first few plus a total count. Ask a narrower
+  question if you want specifics.
+- **Double-check anything important.** The assistant is reading real FCC
+  data, but it's still an AI and can misread or over-summarize. For
+  anything that matters, follow up on the actual page — and remember this
+  site is a daily mirror of FCC data, not the official source of record.
+
+If your assistant reports that it can't connect, make sure you used the
+address exactly as shown above and that it's configured as a remote HTTP
+MCP server.
 
 ## Frequently asked questions
 

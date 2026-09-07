@@ -2189,6 +2189,97 @@ be decided before scaffolding rather than debugged afterwards.
 
 Docs-only; `plan.md` is not baked into any image, so no redeploy.
 
+### 2026-09-07 — MCP server built, tested, and live
+
+`docs/plan.md` §12a's plan is implemented and deployed. The server is at
+`https://fcculs-explorer.n00tz.net/mcp` and answers a real MCP client.
+
+**Prerequisites first.** `api/tests/run_integration.sh` was still pinning
+`python:3.12-slim` after the Dockerfiles moved to 3.14, and hardcoded its
+unit-test list — which had already gone stale and was silently skipping
+files. It now globs `tests/test_*.py`. That change immediately surfaced a
+failing assertion in `test_field_defs.py` claiming
+`applicant_type_code["B"] == "Club"`; the authored source
+(`web/src/lib/fieldDefs.js:165`) says `Amateur Club`, so **the test was
+wrong, not the generator**. Also closed the last rate-limit gap: the
+Amateur and Tower *detail* endpoints, plus both `identity.py` endpoints,
+now enforce the shared search tier, verified by asserting real `429`s
+rather than testing the helper in isolation.
+
+**The SDK did not match the plan.** Verified by running it, not reading
+about it: `MCPServer.__init__` has no `host`/`port`/`transport_security`
+parameters — those live on `streamable_http_app()`. `TransportSecuritySettings()`
+defaults to `enable_dns_rebinding_protection=True` with an *empty*
+allowlist, so the bare constructor rejects everything, while passing
+nothing at all auto-arms a localhost allowlist that 421s behind a proxy.
+Both implicit paths are wrong; it is now set explicitly. The client helper
+is `streamable_http_client` (not `streamablehttp_client`) and yields two
+values, not three. Tool objects expose `input_schema`, not `inputSchema`.
+
+Directory named `mcpsrv/`, as flagged in the planning entry, to avoid
+shadowing the `mcp` SDK package.
+
+**Eleven tools, not twenty.** Browse and detail are unified behind a
+`service` enum rather than one tool per service, keeping the catalog small
+enough for a model to reason about. Service-specific filters
+(`operator_class`, `n_number`, `ship_name`, `mmsi`) are forwarded *only*
+to the service that accepts them — the API rejects unknown query params,
+so leaking one would convert an ignorable argument into a hard failure.
+Covered by both a unit and an integration test.
+
+**Caught in self-review:** `call_api_tool` was defined but never called,
+so `ApiError` would have escaped as an opaque protocol error instead of
+the intended `{error, status_code}` payload. A 404 for an unknown callsign
+is normal usage, not a failure, and now reads as such.
+
+**Testing.** 12 unit tests plus an integration run driving real MCP
+protocol calls through a real `api` and Postgres in a disposable pod.
+Debugging it produced one finding worth more than the feature: a CRLF line
+ending broke the test script, and the root cause was that the repo had
+**no `.gitattributes` at all**, so the Windows worktree held CRLF in 19
+files — including `deploy/update.sh`. That is a latent hazard for anyone
+cloning on Windows, not a quirk of the new file. Added `.gitattributes`
+forcing LF on `*.sh`/`Dockerfile`/`*.container`/`Caddyfile` and normalized
+all 19.
+
+**A real bug that only live testing could find.** Everything passed
+inside the podman network, but through the public hostname
+`https://…/mcp/` redirected to **`http://…/mcp`** — a protocol downgrade
+MCP clients refuse to follow. Only the un-slashed path worked. Two
+compounding mistakes: `header_up X-Forwarded-Proto {scheme}` forwarded
+*Caddy's own* scheme, which is always `http` because Cloudflare terminates
+TLS and cloudflared reaches the container over plain HTTP; and simply
+deleting that line did not help either, because Caddy deliberately ignores
+an incoming `X-Forwarded-Proto` unless the sender is a configured
+`trusted_proxy`. (Caddy's own "Unnecessary header_up X-Forwarded-Proto"
+warning is actively misleading here.) Confirmed by probing rather than
+assuming — Cloudflare *does* send `X-Forwarded-Proto: https` and a
+`Cf-Visitor` scheme of `https` while Caddy's `{scheme}` is `http` — and
+fixed by matching on that header, which re-asserts the true scheme without
+hardcoding cloudflared's IP and leaves genuine plain-HTTP LAN requests
+alone. Also corrected a comment that had the redirect backwards: the SDK
+mounts at `/mcp` and redirects `/mcp/` → `/mcp`, not the reverse;
+`handle /mcp*` was right for the opposite reason to the one documented.
+
+**Live verification** with the real SDK client against production: all 11
+tools advertised, `search_uls` and `get_license` returning real data,
+cross-service FRN grouping working, all four licence services plus towers
+browsing, oversized `page_size` rejected, `describe_code` translating `E`
+to `Amateur Extra`, a 404 degrading to a structured error, and an invalid
+enum rejected by schema validation. Recorded as `mcpsrv/tests/live_check.py`
+so it can be re-run after future deploys. Writing that script also exposed
+that two of its own calls used wrong parameter names, one of which had an
+assertion weak enough to pass while the call was actually erroring — both
+tightened.
+
+`update.sh`'s stale-image check now covers five images, and
+`docs/architecture.md` gained a new §11 plus topology/diagram updates. The
+architecture doc's claim that detail-endpoint rate limiting was still an
+open gap was stale and has been corrected.
+
+Redeploy required: `web` (Caddyfile and the baked-in `/help` guide), plus
+the new `mcp` unit.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
@@ -2202,18 +2293,20 @@ so they aren't lost or accidentally reinvented differently later:
   substantially cheaper: adding a service is now largely a config-dict
   entry on both the API and frontend sides rather than new hand-written
   modules.
-- **An MCP (Model Context Protocol) server** — fully planned, not yet
-  built. See "§12a. MCP Server — Planned Design (Not Yet Built)" below
-  for the complete design (scope, stack, repo layout, deployment
-  wiring, and open items) so a future session can resume directly into
-  implementation without re-deriving these decisions.
+- **An MCP (Model Context Protocol) server** — ✅ **built and deployed.**
+  See "§12a. MCP Server" below for the design, and the
+  "2026-09-07 — MCP server built, tested, and live" Progress Log entry for
+  what actually changed versus the plan.
 
-## 12a. MCP Server — Planned Design (Not Yet Built)
+## 12a. MCP Server — Design (BUILT — live at `/mcp`)
 
-Planned on request; deliberately not started yet (revisit when the user
-is ready to build). This section exists so a future session can resume
-directly into implementation with zero lost context — treat it as a
-design doc, not a progress log entry (nothing here is "done").
+**Status: implemented and deployed.** This section is retained as the
+design record. Where the SDK's real API differed from what was planned
+here — and it differed in several places — the Progress Log entry
+"2026-09-07 — MCP server built, tested, and live" is authoritative.
+Notably, the shipped tool surface is **eleven** tools using a unified
+`service` enum, not the per-service pairs sketched below, and the
+directory is `mcpsrv/`.
 
 **Last refreshed** after the GMRS/Aircraft/Ship, New Hams, and
 pagination rounds. The original draft of this section predated those
