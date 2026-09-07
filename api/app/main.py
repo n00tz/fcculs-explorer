@@ -9,7 +9,7 @@ from .admin_auth import init_admin_password
 from .config import settings
 from .db import close_pool, open_pool
 from .ratelimit import close_redis
-from .routers import admin, amateur, auth, channels, identity, search, towers, watches
+from .routers import admin, amateur, auth, channels, identity, new_hams, search, towers, watches
 
 
 @asynccontextmanager
@@ -51,6 +51,7 @@ app.include_router(search.router)
 app.include_router(amateur.router)
 app.include_router(towers.router)
 app.include_router(identity.router)
+app.include_router(new_hams.router)
 app.include_router(auth.router)
 app.include_router(watches.router)
 app.include_router(channels.router)

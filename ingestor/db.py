@@ -98,16 +98,33 @@ def insert_change_event(
     source_file: str,
     effective_date: date,
     frn: Optional[str] = None,
+    is_new_operator: bool = False,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO change_events
-                (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn, is_new_operator)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (subject_type, subject_key, uls_system_id, field_name,
              str(old_value) if old_value is not None else None,
              str(new_value) if new_value is not None else None,
-             source_file, effective_date, frn or None),
+             source_file, effective_date, frn or None, is_new_operator),
         )
+
+
+def frn_has_prior_amateur_license(conn: psycopg.Connection, frn: str) -> bool:
+    """True if amat_en already has ANY row for this FRN.
+
+    Must be called BEFORE the new row's own upsert_row() runs in ingest.py's
+    loop, so the brand-new row being evaluated is correctly excluded from its
+    own check (this ordering is already guaranteed today -- see ingest.py).
+    Used to durably flag a change_events row as "first-ever amat_en record
+    for this FRN" (a "new ham"/"new club" celebration), computed once at
+    ingest time so it never retroactively changes if this FRN later gains a
+    second/vanity callsign.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT EXISTS(SELECT 1 FROM amat_en WHERE frn = %s)", (frn,))
+        return bool(cur.fetchone()[0])

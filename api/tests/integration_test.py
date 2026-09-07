@@ -67,6 +67,31 @@ VALUES ('7654321', 1334622, 'REG', 'A1385251', 'T', 'N', 151663.9, 'W', 316512.9
 
 INSERT INTO change_events (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date)
 VALUES ('amateur_license', 'N0OTZ', '232195', 'license_status', 'A', 'E', 'l_am_mon.zip', '2026-09-02');
+
+-- "New hams" celebration fixtures: a first-ever individual grant, a
+-- first-ever club grant, and a SECOND callsign for an already-known FRN
+-- (must be excluded from the celebration feed despite also being a
+-- synthetic license_granted event).
+INSERT INTO amat_hd (unique_system_identifier, call_sign, license_status, grant_date, expired_date)
+VALUES (500001, 'KJ4TEST1', 'A', '2026-09-05', '2036-09-05');
+INSERT INTO amat_en (unique_system_identifier, call_sign, entity_name, frn, state, city, street_address, applicant_type_code)
+VALUES (500001, 'KJ4TEST1', 'NEWHAM, TEST A', '0005550001', 'GA', 'RINGGOLD', '1 New Ham Way', 'I');
+INSERT INTO change_events (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn, is_new_operator)
+VALUES ('amateur_license', 'KJ4TEST1', '500001', 'license_granted', NULL, 'KJ4TEST1', 'l_am_wed.zip', '2026-09-05', '0005550001', TRUE);
+
+INSERT INTO amat_hd (unique_system_identifier, call_sign, license_status, grant_date, expired_date)
+VALUES (500002, 'W4TESTCLUB', 'A', '2026-09-06', '2036-09-06');
+INSERT INTO amat_en (unique_system_identifier, call_sign, entity_name, frn, state, city, street_address, applicant_type_code)
+VALUES (500002, 'W4TESTCLUB', 'TEST AMATEUR RADIO CLUB', '0005550002', 'GA', 'RINGGOLD', '2 New Ham Way', 'B');
+INSERT INTO change_events (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn, is_new_operator)
+VALUES ('amateur_license', 'W4TESTCLUB', '500002', 'license_granted', NULL, 'W4TESTCLUB', 'l_am_thu.zip', '2026-09-06', '0005550002', TRUE);
+
+INSERT INTO amat_hd (unique_system_identifier, call_sign, license_status, grant_date, expired_date)
+VALUES (500003, 'KJ4TEST2', 'A', '2026-09-07', '2036-09-07');
+INSERT INTO amat_en (unique_system_identifier, call_sign, entity_name, frn, state, city, street_address, applicant_type_code)
+VALUES (500003, 'KJ4TEST2', 'NEWHAM, TEST A', '0005550001', 'GA', 'RINGGOLD', '1 New Ham Way', 'I');
+INSERT INTO change_events (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn, is_new_operator)
+VALUES ('amateur_license', 'KJ4TEST2', '500003', 'license_granted', NULL, 'KJ4TEST2', 'l_am_fri.zip', '2026-09-07', '0005550001', FALSE);
 """
 
 
@@ -149,6 +174,45 @@ def main():
         members = resp.json()["members"]
         assert {"N0OTZ", "KJ4IKD"} <= {m["subject_key"] for m in members}
         print("identity by FRN OK")
+
+        # --- new hams celebration ---
+        resp = client.get("/api/new-hams")
+        assert resp.status_code == 200, resp.text
+        nh = resp.json()
+        assert nh["total_individuals"] == 1, nh  # KJ4TEST1 only -- KJ4TEST2 must be excluded
+        assert nh["total_clubs"] == 1, nh
+        assert nh["total"] == 2, nh
+        call_signs = {item["call_sign"] for item in nh["items"]}
+        assert call_signs == {"KJ4TEST1", "W4TESTCLUB"}, call_signs
+        by_call = {item["call_sign"]: item for item in nh["items"]}
+        assert by_call["KJ4TEST1"]["applicant_type"] == "individual"
+        assert by_call["KJ4TEST1"]["grant_date"] == "2026-09-05"
+        assert by_call["W4TESTCLUB"]["applicant_type"] == "club"
+        print("new hams celebration (unfiltered) OK")
+
+        resp = client.get("/api/new-hams", params={"type": "individual"})
+        assert resp.status_code == 200, resp.text
+        nh_ind = resp.json()
+        assert nh_ind["total"] == 1, nh_ind
+        assert {item["call_sign"] for item in nh_ind["items"]} == {"KJ4TEST1"}
+        print("new hams celebration (type=individual) OK")
+
+        resp = client.get("/api/new-hams", params={"type": "club"})
+        assert resp.status_code == 200, resp.text
+        nh_club = resp.json()
+        assert nh_club["total"] == 1, nh_club
+        assert {item["call_sign"] for item in nh_club["items"]} == {"W4TESTCLUB"}
+        print("new hams celebration (type=club) OK")
+
+        resp = client.get("/api/new-hams", params={"type": "not-a-real-type"})
+        assert resp.status_code == 400, resp.text
+        print("new hams celebration type validation OK")
+
+        resp = client.get("/api/new-hams", params={"page": 1, "page_size": 1})
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()["items"]) == 1
+        assert resp.json()["total"] == 2
+        print("new hams celebration pagination OK")
 
         # --- auth: request link -> verify -> me ---
         resp = client.post("/api/auth/request-link", json={"email": "n0test@example.com"})

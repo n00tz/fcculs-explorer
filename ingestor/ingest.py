@@ -10,7 +10,13 @@ from typing import Optional
 
 import psycopg
 
-from db import fetch_existing_row, insert_change_event, upsert_row, upsert_rows_batch
+from db import (
+    fetch_existing_row,
+    frn_has_prior_amateur_license,
+    insert_change_event,
+    upsert_row,
+    upsert_rows_batch,
+)
 from differ import diff_rows
 from parser import parse_dat_file
 
@@ -102,6 +108,17 @@ def ingest_file(
             if generate_diffs and new_record_field and subject_field and subject_type:
                 frn = (record.get("frn") or "").strip()
                 if frn:
+                    # "New ham"/"new club" celebration flag: only meaningful
+                    # for amat_en (an amateur license grant) -- the concept
+                    # doesn't apply to tower registrations. Checked BEFORE
+                    # this record's own upsert_row() call below, so the row
+                    # being evaluated is correctly excluded from its own
+                    # existence check. Computed once here and never revisited
+                    # later, so it can't retroactively flip if this FRN later
+                    # gains a second/vanity callsign.
+                    is_new_operator = (
+                        table == "amat_en" and not frn_has_prior_amateur_license(conn, frn)
+                    )
                     insert_change_event(
                         conn,
                         subject_type=subject_type,
@@ -113,6 +130,7 @@ def ingest_file(
                         source_file=source_file,
                         effective_date=effective_date,
                         frn=frn,
+                        is_new_operator=is_new_operator,
                     )
                     changes += 1
         elif generate_diffs and subject_field and subject_type:

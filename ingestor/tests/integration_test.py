@@ -104,7 +104,7 @@ def main():
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT subject_type, subject_key, field_name, old_value, new_value, frn "
+            "SELECT subject_type, subject_key, field_name, old_value, new_value, frn, is_new_operator "
             "FROM change_events WHERE frn = '0009999999'"
         )
         rows = cur.fetchall()
@@ -116,8 +116,43 @@ def main():
         assert rows[0][3] is None
         assert rows[0][4] == "KJ4KLO"
         assert rows[0][5] == "0009999999"
+        assert rows[0][6] is True, "first-ever amat_en row for this FRN must be flagged is_new_operator=true"
 
     print("ALL WATCH-BY-FRN CHECKS PASSED")
+
+    # 4. "New hams" celebration flag must NOT retroactively fire for a
+    #    SECOND callsign granted to an ALREADY-KNOWN FRN (e.g. a vanity
+    #    callsign) -- proves is_new_operator correctly tells a true
+    #    first-timer apart from an existing licensee's additional callsign.
+    second_en_row = (
+        b"EN|999998|||N0OTZ|L|L09999998|TESTUSER, NEW E|NEW|E|TESTUSER|||||"
+        b"1 New Ham Way|RINGGOLD|GA|30736|||000|0009999999|I||||||\n"
+    )
+    daily_en_path2 = Path("/tmp/daily_EN2.dat")
+    daily_en_path2.write_bytes(en_content + new_en_row + second_en_row)
+
+    result5 = ingest_file(
+        conn, daily_en_path2,
+        {"schema": schemas.AMAT_EN, "table": "amat_en", "key": ["unique_system_identifier"]},
+        source_file="l_am_wed.zip", effective_date=date(2026, 9, 4), generate_diffs=True,
+    )
+    print("EN daily load (second callsign, same FRN) OK:", result5)
+    assert result5["inserted"] == 1, result5  # only the brand-new N0OTZ row; KJ4KLO already exists
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT subject_key, is_new_operator FROM change_events "
+            "WHERE frn = '0009999999' ORDER BY detected_at"
+        )
+        rows = cur.fetchall()
+        print("second-callsign change_events rows:", rows)
+        assert len(rows) == 2
+        assert rows[0][0] == "KJ4KLO" and rows[0][1] is True
+        assert rows[1][0] == "N0OTZ" and rows[1][1] is False, (
+            "a second callsign for an already-known FRN must NOT be flagged is_new_operator"
+        )
+
+    print("ALL NEW-HAMS CELEBRATION FLAG CHECKS PASSED")
 
 
 if __name__ == "__main__":

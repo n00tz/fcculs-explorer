@@ -195,6 +195,14 @@ tr:hover td {
 .pill.status-C {
 	color: var(--danger);
 }
+.pill.type-individual {
+	color: var(--accent);
+	margin-left: 0.4rem;
+}
+.pill.type-club {
+	color: var(--success);
+	margin-left: 0.4rem;
+}
 
 .pill-link {
 	background: none;
@@ -410,4 +418,25 @@ tr:hover td {
 	margin: 0;
 	color: var(--text-dim);
 	font-size: 0.9rem;
+}
+
+.new-hams-widget {
+	margin: 1.5rem 0;
+}
+.new-hams-widget h2 {
+	margin: 0 0 0.5rem;
+	font-size: 1.1rem;
+}
+.new-hams-summary {
+	margin: 0 0 0.75rem;
+	color: var(--text-dim);
+	font-size: 0.9rem;
+}
+.new-hams-table {
+	width: 100%;
+	font-size: 0.9rem;
+}
+.new-hams-footnote {
+	margin: 0.5rem 0 0;
+	font-size: 0.85rem;
 }

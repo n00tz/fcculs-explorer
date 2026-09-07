@@ -1,5 +1,6 @@
 <script>
 	import { get } from '$lib/api.js';
+	import { onMount } from 'svelte';
 	import HeroGraphic from '$lib/HeroGraphic.svelte';
 
 	let query = '';
@@ -48,6 +49,50 @@
 			tower_entity: 'Tower Entity'
 		}[type] ?? type;
 	}
+
+	// "New hams" celebration widget: recently-granted first-ever amateur
+	// licenses (individuals) and club stations. Fixed at 12 rows/page so it
+	// stays a bounded height regardless of which page is showing, per the
+	// "keep it above the fold" requirement.
+	const newHamsPageSize = 12;
+	let newHamsPage = 1;
+	let newHamsItems = [];
+	let newHamsTotal = 0;
+	let newHamsTotalIndividuals = 0;
+	let newHamsTotalClubs = 0;
+	let newHamsLoading = false;
+	let newHamsError = '';
+
+	async function loadNewHams() {
+		newHamsLoading = true;
+		newHamsError = '';
+		try {
+			const data = await get('/new-hams', { page: newHamsPage, page_size: newHamsPageSize });
+			newHamsItems = data.items;
+			newHamsTotal = data.total;
+			newHamsTotalIndividuals = data.total_individuals;
+			newHamsTotalClubs = data.total_clubs;
+		} catch (e) {
+			newHamsError = e.message;
+		} finally {
+			newHamsLoading = false;
+		}
+	}
+
+	function newHamsNextPage() {
+		if (newHamsPage * newHamsPageSize < newHamsTotal) {
+			newHamsPage += 1;
+			loadNewHams();
+		}
+	}
+	function newHamsPrevPage() {
+		if (newHamsPage > 1) {
+			newHamsPage -= 1;
+			loadNewHams();
+		}
+	}
+
+	onMount(loadNewHams);
 </script>
 
 <svelte:head>
@@ -103,6 +148,53 @@
 		</div>
 	{/if}
 {/if}
+
+<div class="card new-hams-widget">
+	<h2>🎉 New Hams</h2>
+	{#if newHamsLoading && newHamsItems.length === 0}
+		<p class="muted">Loading…</p>
+	{:else if newHamsError}
+		<p class="error">{newHamsError}</p>
+	{:else if newHamsTotal === 0}
+		<p class="muted">No new grants yet — check back after the next daily FCC update.</p>
+	{:else}
+		<p class="new-hams-summary">
+			<strong>{newHamsTotalIndividuals}</strong> new amateur radio operators licensed ·
+			<strong>{newHamsTotalClubs}</strong> new club stations
+		</p>
+		<table class="new-hams-table">
+			<thead>
+				<tr>
+					<th>Callsign</th>
+					<th>Name</th>
+					<th>City/State</th>
+					<th>Grant Date</th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each newHamsItems as row}
+					<tr>
+						<td><a href={`/amateur/${row.call_sign}`}>{row.call_sign}</a></td>
+						<td>
+							{row.name ?? '—'}
+							<span class={`pill type-${row.applicant_type}`}>
+								{row.applicant_type === 'club' ? 'Club' : 'Individual'}
+							</span>
+						</td>
+						<td>{[row.city, row.state].filter(Boolean).join(', ') || '—'}</td>
+						<td>{row.grant_date ?? '—'}</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+		<div class="pagination">
+			<button class="secondary" disabled={newHamsPage <= 1} on:click={newHamsPrevPage}>← Previous</button>
+			<span class="muted">Page {newHamsPage} · {newHamsTotal} total</span>
+			<button class="secondary" disabled={newHamsPage * newHamsPageSize >= newHamsTotal} on:click={newHamsNextPage}>Next →</button>
+		</div>
+	{/if}
+	<p class="muted new-hams-footnote"><a href="/new-hams">See the full listing →</a></p>
+</div>
 
 <div class="feature-grid">
 	<div class="card feature-card">
