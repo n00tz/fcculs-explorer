@@ -98,10 +98,12 @@ async def new_hams(
                 en.city,
                 en.state,
                 hd.grant_date,
+                am.operator_class,
                 CASE en.applicant_type_code WHEN 'I' THEN 'individual' ELSE 'club' END AS applicant_type
             FROM change_events ce
             JOIN amat_en en ON en.unique_system_identifier = ce.uls_system_id::bigint
             LEFT JOIN amat_hd hd ON hd.unique_system_identifier = en.unique_system_identifier
+            LEFT JOIN amat_am am ON am.unique_system_identifier = en.unique_system_identifier
             WHERE ce.is_new_operator
               AND ce.effective_date >= current_date - %(window_days)s::int
               AND en.applicant_type_code IN ('I', 'B')

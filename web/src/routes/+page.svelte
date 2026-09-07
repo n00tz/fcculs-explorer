@@ -1,5 +1,6 @@
 <script>
 	import { get } from '$lib/api.js';
+	import { describeCode, fieldHelp } from '$lib/fieldDefs.js';
 	import { onMount } from 'svelte';
 	import HeroGraphic from '$lib/HeroGraphic.svelte';
 	import { serviceRoute, PERSONAL_SERVICE_LIST } from '$lib/personalServices.js';
@@ -182,6 +183,7 @@
 				<tr>
 					<th>Callsign</th>
 					<th>Name</th>
+					<th title={fieldHelp('operator_class')}>Class</th>
 					<th>City/State</th>
 					<th>Grant Date</th>
 				</tr>
@@ -195,6 +197,13 @@
 							<span class={`pill type-${row.applicant_type}`}>
 								{row.applicant_type === 'club' ? 'Club' : 'Individual'}
 							</span>
+						</td>
+						<td>
+							{#if row.operator_class}
+								<span class={`pill opclass-${row.operator_class}`} title={`Operator class ${row.operator_class} — ${describeCode('operator_class', row.operator_class) ?? 'not documented'}`}>
+									{describeCode('operator_class', row.operator_class) ?? row.operator_class}
+								</span>
+							{:else}—{/if}
 						</td>
 						<td>{[row.city, row.state].filter(Boolean).join(', ') || '—'}</td>
 						<td>{row.grant_date ?? '—'}</td>

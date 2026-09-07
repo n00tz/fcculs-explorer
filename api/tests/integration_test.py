@@ -76,6 +76,11 @@ INSERT INTO amat_hd (unique_system_identifier, call_sign, license_status, grant_
 VALUES (500001, 'KJ4TEST1', 'A', '2026-09-05', '2036-09-05');
 INSERT INTO amat_en (unique_system_identifier, call_sign, entity_name, frn, state, city, street_address, applicant_type_code)
 VALUES (500001, 'KJ4TEST1', 'NEWHAM, TEST A', '0005550001', 'GA', 'RINGGOLD', '1 New Ham Way', 'I');
+-- Deliberately Amateur Extra, not Technician: a first-time licensee can
+-- test straight into a higher class, and the celebration table must show
+-- that rather than assuming everyone starts at Technician.
+INSERT INTO amat_am (unique_system_identifier, callsign, operator_class, group_code)
+VALUES (500001, 'KJ4TEST1', 'E', 'A');
 INSERT INTO change_events (subject_type, subject_key, uls_system_id, field_name, old_value, new_value, source_file, effective_date, frn, is_new_operator)
 VALUES ('amateur_license', 'KJ4TEST1', '500001', 'license_granted', NULL, 'KJ4TEST1', 'l_am_wed.zip', '2026-09-05', '0005550001', TRUE);
 
@@ -241,7 +246,15 @@ def main():
         by_call = {item["call_sign"]: item for item in nh["items"]}
         assert by_call["KJ4TEST1"]["applicant_type"] == "individual"
         assert by_call["KJ4TEST1"]["grant_date"] == "2026-09-05"
+        # A first-time licensee who tested straight into Amateur Extra --
+        # ~10% of real new hams start above Technician, so the class must be
+        # carried through rather than assumed.
+        assert by_call["KJ4TEST1"]["operator_class"] == "E", by_call["KJ4TEST1"]
         assert by_call["W4TESTCLUB"]["applicant_type"] == "club"
+        # Clubs have no operator class at all (confirmed against production
+        # data); the field must be present-but-null, not missing, so the UI
+        # can render its em-dash fallback.
+        assert by_call["W4TESTCLUB"]["operator_class"] is None, by_call["W4TESTCLUB"]
         print("new hams celebration (unfiltered) OK")
 
         resp = client.get("/api/new-hams", params={"type": "individual"})

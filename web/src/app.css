@@ -204,6 +204,23 @@ tr:hover td {
 	margin-left: 0.4rem;
 }
 
+/* Operator class in the New Hams celebration. Most first licenses are
+   Technician, so the higher entry-level classes are highlighted to make a
+   "straight to General/Extra" debut visible at a glance. */
+.pill.opclass-T,
+.pill.opclass-N {
+	color: var(--text-dim);
+}
+.pill.opclass-G {
+	color: var(--accent);
+	font-weight: 600;
+}
+.pill.opclass-E,
+.pill.opclass-A {
+	color: var(--success);
+	font-weight: 600;
+}
+
 .pill-link {
 	background: none;
 	border: none;
