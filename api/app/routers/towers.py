@@ -103,7 +103,17 @@ async def browse_towers(
 
 
 @router.get("/{registration_number}")
-async def tower_detail(registration_number: str, conn: AsyncConnection = Depends(get_db)):
+async def tower_detail(
+    request: Request,
+    registration_number: str,
+    conn: AsyncConnection = Depends(get_db),
+):
+    client_ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        f"tower-detail:{client_ip}",
+        settings.rate_limit_search_max,
+        settings.rate_limit_search_window_seconds,
+    )
     async with conn.cursor() as cur:
         await cur.execute(
             "SELECT * FROM tower_ra WHERE registration_number = %s", (registration_number,)

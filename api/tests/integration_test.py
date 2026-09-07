@@ -281,6 +281,115 @@ def main():
         assert resp.json()["total"] == 2
         print("new hams celebration pagination OK")
 
+        # --- change history (GET /api/history) ---
+        # Backs the MCP get_change_history tool; nothing else exposed
+        # change_events as a standalone queryable resource.
+        resp = client.get("/api/history", params={"subject_key": "WRAA123"})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1, body
+        event = body["items"][0]
+        assert event["subject_type"] == "gmrs_license"
+        assert event["field_name"] == "license_granted"
+        assert event["new_value"] == "WRAA123"
+        # The newer columns must be exposed, not just the original ones.
+        assert event["frn"] == "0001112223"
+        assert event["service"] == "gmrs"
+        assert "is_new_operator" in event
+        print("history by subject_key OK")
+
+        # Callsigns are stored upper-cased; a lower-case query must still hit.
+        resp = client.get("/api/history", params={"subject_key": "wraa123"})
+        assert resp.json()["total"] == 1, resp.text
+        print("history subject_key normalization OK")
+
+        # An FRN lookup spans services: this FRN holds both N0OTZ (amateur)
+        # and WRAA123 (GMRS), and only the GMRS row carries a change event.
+        resp = client.get("/api/history", params={"frn": "0001112223"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["total"] == 1, resp.text
+        print("history by FRN OK")
+
+        # `service` is the friendly alias for `subject_type`.
+        resp = client.get(
+            "/api/history", params={"subject_key": "WRAA123", "service": "gmrs"}
+        )
+        assert resp.json()["total"] == 1, resp.text
+        resp = client.get(
+            "/api/history", params={"subject_key": "WRAA123", "service": "amateur"}
+        )
+        assert resp.json()["total"] == 0, resp.text
+        print("history service filter OK")
+
+        # Date-range filtering (the GMRS event is effective 2026-08-15).
+        resp = client.get(
+            "/api/history", params={"subject_key": "WRAA123", "since": "2026-08-01"}
+        )
+        assert resp.json()["total"] == 1, resp.text
+        resp = client.get(
+            "/api/history", params={"subject_key": "WRAA123", "since": "2026-09-01"}
+        )
+        assert resp.json()["total"] == 0, resp.text
+        resp = client.get(
+            "/api/history", params={"subject_key": "WRAA123", "until": "2026-08-01"}
+        )
+        assert resp.json()["total"] == 0, resp.text
+        print("history date-range filter OK")
+
+        # Validation: neither identifier, both type params, bad values,
+        # and an inverted date range must all be rejected explicitly
+        # rather than silently returning everything or nothing.
+        assert client.get("/api/history").status_code == 400
+        assert client.get(
+            "/api/history",
+            params={"subject_key": "X", "service": "gmrs", "subject_type": "gmrs_license"},
+        ).status_code == 400
+        assert client.get(
+            "/api/history", params={"subject_key": "X", "service": "nope"}
+        ).status_code == 400
+        assert client.get(
+            "/api/history", params={"subject_key": "X", "subject_type": "nope"}
+        ).status_code == 400
+        assert client.get(
+            "/api/history",
+            params={"subject_key": "X", "since": "2026-09-01", "until": "2026-08-01"},
+        ).status_code == 400
+        print("history validation OK")
+
+        # --- field definitions (GET /api/field-definitions) ---
+        # Closes the gap where non-browser clients received raw FCC codes.
+        resp = client.get("/api/field-definitions")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert len(body["field_help"]) > 50, len(body["field_help"])
+        assert body["code_maps"]["license_status"]["A"] == "Active"
+        print("field definitions bulk OK")
+
+        resp = client.get(
+            "/api/field-definitions/describe",
+            params={"category": "operator_class", "code": "E"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["description"] == "Amateur Extra", resp.text
+        print("field definitions describe OK")
+
+        # An unmapped code is a normal outcome -> null, not an error, so a
+        # caller can fall back to showing the raw code unchanged.
+        resp = client.get(
+            "/api/field-definitions/describe",
+            params={"category": "operator_class", "code": "ZZ"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["description"] is None, resp.text
+        # An unknown category IS an error: it means the caller is confused
+        # about the schema rather than hitting an unlisted FCC value.
+        resp = client.get(
+            "/api/field-definitions/describe",
+            params={"category": "not_a_category", "code": "A"},
+        )
+        assert resp.status_code == 400, resp.text
+        print("field definitions unmapped/unknown handling OK")
+
         # --- personal radio services: GMRS / Aircraft / Ship ---
         # Browse, sort validation, service-specific filters, detail sections,
         # and the New Hams exclusion, exercised uniformly across all three.
@@ -589,6 +698,48 @@ def main():
         resp = client.get("/api/admin/users")
         assert resp.status_code == 401
         print("admin auth-required enforcement OK")
+
+        # --- rate limiting on newly-limited read endpoints ---
+        # test_ratelimit.py covers enforce_rate_limit's own mechanics; this
+        # proves the four endpoints are actually WIRED to it. Run last, since
+        # it deliberately exhausts each endpoint's per-IP budget.
+        import redis as redis_lib
+
+        from app.config import settings
+
+        redis_client = redis_lib.from_url(settings.redis_url)
+        limit = settings.rate_limit_search_max
+
+        for label, path, params in (
+            ("amateur detail", "/api/amateur/N0OTZ", None),
+            ("tower detail", "/api/towers/1234567", None),
+            ("identity by FRN", "/api/identity/frn/0001112223", None),
+            (
+                "identity by address",
+                "/api/identity/address",
+                {
+                    "street_address": "100 Test Rd",
+                    "city": "RINGGOLD",
+                    "state": "GA",
+                    "zip_code": "30736",
+                },
+            ),
+        ):
+            # Clear any budget already consumed by earlier tests so the
+            # threshold below is exact rather than approximate.
+            for key in redis_client.scan_iter("ratelimit:*"):
+                redis_client.delete(key)
+
+            for i in range(limit):
+                resp = client.get(path, params=params)
+                assert resp.status_code == 200, f"{label} req {i}: {resp.text}"
+            resp = client.get(path, params=params)
+            assert resp.status_code == 429, f"{label} was not rate limited: {resp.text}"
+            print(f"rate limit enforced on {label} OK")
+
+        for key in redis_client.scan_iter("ratelimit:*"):
+            redis_client.delete(key)
+        redis_client.close()
 
     print("ALL API INTEGRATION CHECKS PASSED")
 

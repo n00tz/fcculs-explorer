@@ -10,8 +10,8 @@ from .config import settings
 from .db import close_pool, open_pool
 from .ratelimit import close_redis
 from .routers import (
-    admin, amateur, auth, channels, identity, new_hams, personal_services,
-    search, towers, watches,
+    admin, amateur, auth, channels, field_definitions, history, identity,
+    new_hams, personal_services, search, towers, watches,
 )
 
 
@@ -59,6 +59,8 @@ for _service_router in personal_services.routers:
     app.include_router(_service_router)
 app.include_router(identity.router)
 app.include_router(new_hams.router)
+app.include_router(history.router)
+app.include_router(field_definitions.router)
 app.include_router(auth.router)
 app.include_router(watches.router)
 app.include_router(channels.router)

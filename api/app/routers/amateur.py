@@ -105,8 +105,18 @@ async def browse_amateur(
 
 
 @router.get("/{call_sign}")
-async def amateur_detail(call_sign: str, conn: AsyncConnection = Depends(get_db)):
+async def amateur_detail(
+    request: Request,
+    call_sign: str,
+    conn: AsyncConnection = Depends(get_db),
+):
     call_sign = call_sign.upper()
+    client_ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        f"amateur-detail:{client_ip}",
+        settings.rate_limit_search_max,
+        settings.rate_limit_search_window_seconds,
+    )
     async with conn.cursor() as cur:
         # A callsign can have MULTIPLE unique_system_identifier rows across
         # time (reassigned as a vanity after a prior holder's license

@@ -48,13 +48,16 @@ for migration in $(ls /tmp/db_migrations/*.sql | sort); do
     -f "/tmp/db_migrations/$name"
 done
 
-echo "=== Running API unit + integration tests in python:3.12-slim ==="
+echo "=== Running API unit + integration tests in python:3.14-slim ==="
+# Runtime matches api/Dockerfile (python:3.14-slim). This previously pinned
+# 3.12 and had silently drifted after the base image was bumped, which meant
+# tests were validating against a runtime production no longer uses.
 podman run --rm --pod fcculs-api-itest \
   -v /tmp/api_full:/app:Z \
   -e FCCULS_DATABASE_URL=postgresql://postgres:test@localhost:5432/fcculs_test \
   -e FCCULS_REDIS_URL=redis://localhost:6379/0 \
-  docker.io/library/python:3.12-slim \
-  bash -c "pip install --quiet -r /app/requirements.txt && cd /app && python3 -m pytest tests/test_security.py tests/test_mailer.py tests/test_auth_base_url.py tests/test_admin_auth.py tests/test_url_safety.py tests/test_ratelimit.py -v && python3 tests/integration_test.py"
+  docker.io/library/python:3.14-slim \
+  bash -c "pip install --quiet -r /app/requirements.txt && cd /app && python3 -m pytest tests/test_*.py -v && python3 tests/integration_test.py"
 
 # tests/real_smtp_smoke_test.py is a real-SMTP-listener smoke test (not
 # auto-run here, same as integration_test.py's real-Postgres model): it
