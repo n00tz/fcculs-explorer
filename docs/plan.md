@@ -1045,6 +1045,74 @@ commands for a given test run are chained into a single SSH invocation.
   self-test and the disposable-container tests) were deleted
   afterward.
 
+- ✅ `security-read-endpoint-rate-limiting` — done. With
+  `fcculs-explorer.n00tz.net` now reachable from the open internet via
+  Cloudflare Tunnel, `/api/search`, `/api/amateur` (browse), and
+  `/api/towers` (browse) had no rate limiting at all — unlike
+  `/api/auth/request-link` and `/api/admin/login`, which already used
+  the Redis-backed `enforce_rate_limit()` helper. These three endpoints
+  run trigram/filter queries against multi-million-row tables with no
+  authentication required, making them the app's easiest DoS/cost-abuse
+  surface. Added a per-client-IP limit to all three using the existing
+  `api/app/ratelimit.py::enforce_rate_limit(key, max_requests,
+  window_seconds)` helper (same Redis INCR+EXPIRE fixed-window pattern
+  already used by `auth.py`/`admin.py`), keyed only by client IP (no
+  email component, since these are unauthenticated GETs). Each endpoint
+  gets its own Redis key namespace (`search:`, `amateur-browse:`,
+  `towers-browse:`) so browsing towers doesn't consume a legitimate
+  user's search budget, mirroring how `request-link`/`admin-login` are
+  independently keyed today — but all three share one new setting pair,
+  `rate_limit_search_max` / `rate_limit_search_window_seconds`
+  (defaults: 60 requests / 60 seconds), added to `api/app/config.py`.
+
+  Unlike the pre-existing `rate_limit_magic_link_*`/
+  `rate_limit_admin_login_*` settings (which turned out to be pure
+  `Settings`-class code defaults with no `.env`/Compose/Quadlet wiring
+  at all), the new `rate_limit_search_*` pair was wired through the
+  full deployment chain end-to-end: `.env.example`
+  (`RATE_LIMIT_SEARCH_MAX` / `RATE_LIMIT_SEARCH_WINDOW_SECONDS`),
+  `compose.yaml`'s `api` service environment block, the
+  `quadlet/fcculs-api.container` `Environment=` lines, and
+  `deploy/install-quadlets.sh`'s variable-defaults + token-substitution
+  logic — following the exact wiring pattern already used for
+  `CORS_ALLOW_ORIGINS`. `README.md`'s configuration reference table was
+  updated to document both new variables.
+
+  Added a new dedicated test file, `api/tests/test_ratelimit.py` (no
+  prior dedicated test file for `enforce_rate_limit()` existed — it was
+  previously only exercised indirectly, once per endpoint, inside
+  `integration_test.py`), covering: requests under the limit are
+  allowed, exceeding the limit raises `HTTPException(429)`, the fixed
+  window resets after it expires (not a permanent ban), and different
+  keys are independent of each other — all against a **real** Redis
+  instance (no mocking), following this suite's established
+  no-mock-for-infra convention. One non-obvious bug surfaced and fixed
+  while writing these tests: `app.ratelimit`'s Redis client is a
+  lazily-created module-level singleton bound to whichever asyncio
+  event loop was running when first used, but each test method here
+  runs its own `asyncio.run()` (its own fresh loop) — the naive version
+  crashed with "Task ... attached to a different loop" / "Event loop is
+  closed" on every test after the first. Fixed by resetting
+  `ratelimit._redis = None` directly (a plain attribute reset, not an
+  `await close_redis()` call, since that itself needs an event loop and
+  would crash trying to close a connection bound to a prior, already-
+  closed loop) in `setUp()`, and by keeping each test's own Redis calls
+  — including the sleep used to prove window expiry — inside a single
+  `asyncio.run()` invocation via `await asyncio.sleep()` rather than a
+  blocking `time.sleep()` between two separate `asyncio.run()` calls.
+
+  Tested per this project's established methodology: ran the full
+  `api/tests/run_integration.sh` suite (now 31 unit tests, up from 27,
+  plus the full `integration_test.py` suite) in a disposable Podman pod
+  on `fcculs@10.64.3.39` — all pass. Deployed to production via
+  `deploy/update.sh` (image revision label `<pending — filled in after
+  this commit is pushed and deployed>`). Live-verified against
+  production's real Redis by curling `/api/search`,
+  `/api/amateur`, and `/api/towers` repeatedly from a single source IP
+  until each independently returned HTTP 429, then confirming requests
+  succeeded again once the 60-second window elapsed, without affecting
+  any other client/IP's ability to use the endpoints.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

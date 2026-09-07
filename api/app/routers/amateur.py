@@ -1,10 +1,12 @@
 """Browse/detail endpoints for Amateur Radio Service licenses."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg import AsyncConnection
 
+from ..config import settings
 from ..db import get_db
 from ..history_codes import describe_history_code
 from ..pagination import Page, PageParams, resolve_sort
+from ..ratelimit import enforce_rate_limit
 
 router = APIRouter(prefix="/api/amateur", tags=["amateur"])
 
@@ -26,6 +28,7 @@ SORTABLE_COLUMNS = {
 
 @router.get("", response_model=Page)
 async def browse_amateur(
+    request: Request,
     callsign: str | None = Query(None),
     name: str | None = Query(None),
     city: str | None = Query(None),
@@ -38,6 +41,12 @@ async def browse_amateur(
     conn: AsyncConnection = Depends(get_db),
 ):
     sort_expr, sort_direction = resolve_sort(sort, order, SORTABLE_COLUMNS, default_column="call_sign")
+    client_ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        f"amateur-browse:{client_ip}",
+        settings.rate_limit_search_max,
+        settings.rate_limit_search_window_seconds,
+    )
     conditions = []
     params: dict = {}
     # Partial (ILIKE) matching on the human-facing fields so "ring", "GA",

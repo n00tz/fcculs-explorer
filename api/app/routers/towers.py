@@ -1,9 +1,11 @@
 """Browse/detail endpoints for Antenna Structure Registration (Tower) data."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg import AsyncConnection
 
+from ..config import settings
 from ..db import get_db
 from ..pagination import Page, PageParams, resolve_sort
+from ..ratelimit import enforce_rate_limit
 
 router = APIRouter(prefix="/api/towers", tags=["towers"])
 
@@ -23,6 +25,7 @@ SORTABLE_COLUMNS = {
 
 @router.get("", response_model=Page)
 async def browse_towers(
+    request: Request,
     registration_number: str | None = Query(None, alias="registrationNumber"),
     structure_type: str | None = Query(None, alias="structureType"),
     city: str | None = Query(None),
@@ -38,6 +41,12 @@ async def browse_towers(
     conn: AsyncConnection = Depends(get_db),
 ):
     sort_expr, sort_direction = resolve_sort(sort, order, SORTABLE_COLUMNS, default_column="registration_number")
+    client_ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        f"towers-browse:{client_ip}",
+        settings.rate_limit_search_max,
+        settings.rate_limit_search_window_seconds,
+    )
     conditions = []
     params: dict = {}
     # Partial (ILIKE) matching on every text field shown in the browse

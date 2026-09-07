@@ -76,6 +76,15 @@ class Settings(BaseSettings):
     rate_limit_magic_link_window_seconds: int = 60 * 60  # 1 hour
     rate_limit_admin_login_max: int = 5
     rate_limit_admin_login_window_seconds: int = 60 * 15  # 15 minutes
+    # Applies per client IP to the unauthenticated read endpoints
+    # (/api/search, /api/amateur browse, /api/towers browse) that run
+    # trigram/filter queries against multi-million-row tables -- the
+    # easiest DoS/cost-abuse surface once the app is reachable from the
+    # internet. 60/minute comfortably covers real interactive browsing
+    # (typeahead search, paging through browse results) while still
+    # bounding a scripted scraper/DoS attempt.
+    rate_limit_search_max: int = 60
+    rate_limit_search_window_seconds: int = 60  # 1 minute
 
     # Channel "test send" -- enqueues a real send job onto the same RQ queue
     # the notifier service consumes (must match FCCULS_QUEUE_NAME on the

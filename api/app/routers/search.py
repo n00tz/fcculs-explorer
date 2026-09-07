@@ -2,10 +2,12 @@
 licensee/entity names -- the primary entry point for "find this callsign or
 ULS ID" per the product requirements.
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from psycopg import AsyncConnection
 
+from ..config import settings
 from ..db import get_db
+from ..ratelimit import enforce_rate_limit
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -52,12 +54,19 @@ LIMIT %(limit)s
 
 @router.get("")
 async def search(
+    request: Request,
     q: str = Query(..., min_length=2, description="Callsign, ASR registration number, or name fragment"),
     limit: int = Query(20, ge=1, le=100),
     conn: AsyncConnection = Depends(get_db),
 ):
     """Trigram-similarity search. An exact-match callsign/registration number
     always scores 1.0 and sorts first; partial/fuzzy matches follow."""
+    client_ip = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        f"search:{client_ip}",
+        settings.rate_limit_search_max,
+        settings.rate_limit_search_window_seconds,
+    )
     q_upper = q.strip().upper()
     async with conn.cursor() as cur:
         await cur.execute(_SEARCH_SQL, {"q": q_upper, "limit": limit})
