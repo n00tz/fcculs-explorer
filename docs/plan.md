@@ -253,6 +253,22 @@ volumes for Postgres data and Redis persistence (if enabled). A
     across the Amateur/Tower detail and browse pages, plus a new
     `/field-definitions` reference page linked from the footer. Standard
     to be followed for any future ULS dataset added to the project.
+36. `new-hams-migration` — `db/006_new_operator_celebration.sql`: add
+    `change_events.is_new_operator` boolean + partial index.
+37. `new-hams-ingestor-flag` — `frn_has_prior_amateur_license()` helper
+    in `ingestor/db.py`, threaded through `insert_change_event()` and
+    `ingest.py`'s existing `NEW_RECORD_FRN_EVENT` branch for `amat_en`
+    only, so a durable "first-ever license for this FRN" flag is
+    computed once at ingest time and never retroactively changes.
+38. `new-hams-api-endpoint` — `GET /api/new-hams`
+    (`api/app/routers/new_hams.py`, rate-limited, Individual/Club
+    filtering and dual totals), registered in `main.py`.
+39. `new-hams-homepage-widget` — Summary line + 12-row paginated
+    celebration widget on the homepage, placed below the search box,
+    above the feature grid.
+40. `new-hams-full-listing-page` — `web/src/routes/new-hams/+page.svelte`
+    full paginated/filterable listing (25/page, type filter dropdown).
+41. `new-hams-footer-link` — "New Hams" link in the footer.
 
 Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
 6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8; 11 depends on 9;
@@ -263,7 +279,10 @@ watch/notifier pipeline); 27,28 are independent of each other and of 26;
 the `frn` subject type) and is best done after 27; 31 is fully independent.
 33 depends on 32 (embeds the hero component); 34 is independent of both.
 35 is fully independent of all prior items (frontend-only presentation
-layer over already-ingested data).
+layer over already-ingested data). 37 depends on 36; 38 depends on 36 (but
+not on 37 — the column defaults to false, so the endpoint just returns an
+empty feed until the next ingest run populates flagged rows); 39,40 depend
+on 38; 41 depends on 40.
 
 ## 10. Progress Log
 
@@ -1452,6 +1471,74 @@ commands for a given test run are chained into a single SSH invocation.
   container confirmed `redis==8.1.0`/`rq==2.12.0` installed. Cleaned up
   all disposable test containers/images/pods used during batch
   verification afterward.
+
+- ✅ **"New Hams" celebration (homepage widget + `/new-hams` full
+  listing)** — done. Adds `db/006_new_operator_celebration.sql`:
+  `change_events.is_new_operator BOOLEAN NOT NULL DEFAULT FALSE` +
+  a partial index (`WHERE is_new_operator`) for fast homepage/listing
+  queries. `ingestor/db.py` gained
+  `frn_has_prior_amateur_license(conn, frn)`, called from
+  `ingestor/ingest.py`'s existing `NEW_RECORD_FRN_EVENT` branch (the
+  synthetic `license_granted` event already emitted for a brand-new
+  `amat_en` row) — checked **before** that row's own `upsert_row()`
+  call (ordering already guaranteed this excludes the row from its own
+  existence check), and set only for `table == "amat_en"` (towers never
+  get the flag; the concept doesn't apply there). This makes the flag
+  durable: once true, it never flips even if that FRN later gains a
+  second/vanity callsign — proven directly in
+  `ingestor/tests/integration_test.py`'s new checks (a genuinely new
+  FRN's first grant flags `is_new_operator=true`; a second callsign
+  granted to that same FRN in a subsequent daily file flags
+  `is_new_operator=false`).
+
+  New `GET /api/new-hams` endpoint
+  (`api/app/routers/new_hams.py`, registered in `main.py`) — same
+  per-IP rate-limit tier as `/api/search`/`/api/amateur`/`/api/towers`
+  (`rate_limit_search_max`/`window_seconds`, no new setting needed).
+  Joins `change_events` (`is_new_operator = true`) to `amat_en`/
+  `amat_hd`, restricted to `applicant_type_code IN ('I','B')`
+  (Individual/Club — other applicant types excluded from this
+  celebratory feature), with an optional `type=individual|club` filter
+  validated against an allow-list (never interpolated raw, same
+  SQL-injection-safety pattern used for `sort`/`order` elsewhere).
+  Returns both a combined `total` and split `total_individuals`/
+  `total_clubs` so the summary line can show both counts per the
+  user's "differentiate, don't hide" requirement. Reused `entity_name`
+  directly for the display name (spot-checked real production data
+  first — `entity_name` is already populated in "LAST, FIRST MI"/club
+  name form for both applicant types, matching every other page in
+  this project that already displays it raw, so no first/last-name
+  reassembly logic was needed).
+
+  Frontend: homepage (`+page.svelte`) gained a celebration widget below
+  the search box, above the feature grid — a summary line with both
+  counts, a 12-row paginated table (Callsign, Name + type pill, City/
+  State, Grant Date), and a link to the new full listing. New
+  `web/src/routes/new-hams/+page.svelte` mirrors the existing browse
+  pages' layout/pagination conventions at 25/page with an All/
+  Individual/Club filter dropdown. Footer (`+layout.svelte`) gained a
+  "New Hams" link. New `.pill.type-individual`/`.pill.type-club` CSS
+  variants added to `app.css`; no other new primitives needed.
+
+  Tested per this project's established methodology: extended
+  `ingestor/tests/integration_test.py` and `api/tests/
+  integration_test.py` (seeded one new-individual, one new-club, and
+  one "second callsign for an already-known FRN" row that must be
+  excluded; asserted counts, filtering, and pagination), both run for
+  real against disposable Postgres(+Redis) pods on
+  `fcculs@10.64.3.39` — all checks passed, including the pre-existing
+  31 API checks (nothing regressed). Ran a full `podman build` of
+  `web/Dockerfile` in a disposable image to confirm the new homepage
+  section and `/new-hams` route compiled cleanly (the same regression
+  class — a bad Svelte binding silently breaking the build — bit this
+  project once before) before ever touching production. Deployed via
+  `deploy/update.sh --force`; confirmed the `is_new_operator` column
+  exists in the live schema, `GET /api/new-hams` and `GET /new-hams`
+  both return HTTP 200 (correctly empty until the next daily ingest —
+  bootstrap loads never generate `change_events`, matching the
+  existing FRN-watch feature's behavior), and the built `web` image's
+  JS bundles contain the new "New Hams" UI text. Cleaned up all
+  disposable pods/images used during verification afterward.
 
 ## 12. Future Features (Deferred)
 
