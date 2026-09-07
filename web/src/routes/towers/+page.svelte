@@ -2,6 +2,7 @@
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
 	import { page as pageStore } from '$app/stores';
+	import { fieldHelp, describeCode } from '$lib/fieldDefs.js';
 
 	let registrationNumber = '';
 	let structureType = '';
@@ -122,7 +123,8 @@
 		<option value="">Any status</option>
 		<option value="C">Constructed</option>
 		<option value="G">Granted</option>
-		<option value="D">Dismantled</option>
+		<option value="I">Dismantled</option>
+		<option value="T">Terminated</option>
 	</select>
 	<input placeholder="Min height (AGL, ft)" type="number" bind:value={heightMin} />
 	<input placeholder="Max height (AGL, ft)" type="number" bind:value={heightMax} />
@@ -137,8 +139,8 @@
 	<thead>
 		<tr>
 			<th><button class="sort-th" on:click={() => toggleSort('registration_number')}>Registration #{sortIndicator('registration_number')}</button></th>
-			<th><button class="sort-th" on:click={() => toggleSort('structure_type')}>Type{sortIndicator('structure_type')}</button></th>
-			<th><button class="sort-th" on:click={() => toggleSort('status_code')}>Status{sortIndicator('status_code')}</button></th>
+			<th><button class="sort-th" title={fieldHelp('structure_type')} on:click={() => toggleSort('structure_type')}>Type{sortIndicator('structure_type')}</button></th>
+			<th><button class="sort-th" title={fieldHelp('status_code')} on:click={() => toggleSort('status_code')}>Status{sortIndicator('status_code')}</button></th>
 			<th><button class="sort-th" on:click={() => toggleSort('city')}>Location{sortIndicator('city')}</button></th>
 			<th><button class="sort-th" on:click={() => toggleSort('overall_height_above_ground')}>Height (AGL){sortIndicator('overall_height_above_ground')}</button></th>
 			<th><button class="sort-th" on:click={() => toggleSort('date_constructed')}>Constructed{sortIndicator('date_constructed')}</button></th>
@@ -150,11 +152,11 @@
 				<td><a href={`/towers/${row.registration_number}`}>{row.registration_number}</a></td>
 				<td>
 					{#if row.structure_type}
-						<button class="pill-link" on:click={() => setFilter('structureType', row.structure_type)}>{row.structure_type}</button>
+						<button class="pill-link" title={describeCode('structure_type', row.structure_type)} on:click={() => setFilter('structureType', row.structure_type)}>{row.structure_type}</button>
 					{:else}—{/if}
 				</td>
 				<td>
-					<button class="pill-link" on:click={() => setFilter('status', row.status_code)}>
+					<button class="pill-link" title={describeCode('status_code_tower', row.status_code)} on:click={() => setFilter('status', row.status_code)}>
 						<span class="pill">{row.status_code ?? '—'}</span>
 					</button>
 				</td>

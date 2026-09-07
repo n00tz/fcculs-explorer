@@ -3,6 +3,9 @@
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
 	import { user } from '$lib/auth.js';
+	import CodeValue from '$lib/CodeValue.svelte';
+	import CodeHint from '$lib/CodeHint.svelte';
+	import { fieldHelp } from '$lib/fieldDefs.js';
 
 	let detail = null;
 	let error = '';
@@ -43,7 +46,7 @@
 {:else if detail}
 	<h1>
 		Tower {detail.registration.registration_number}
-		<span class="pill">{detail.registration.status_code}</span>
+		<span class="pill">{detail.registration.status_code}</span> <CodeHint category="status_code_tower" code={detail.registration.status_code} />
 		{#if $user}
 			<a class="watch-link" href={watchLink('asr_registration_number', detail.registration.registration_number)}>🔔 Watch this tower</a>
 		{/if}
@@ -51,8 +54,8 @@
 
 	<h2>Registration</h2>
 	<div class="card detail-grid">
-		<div><div class="label">Structure Type</div><div class="value">{#if detail.registration.structure_type}<a href={`/towers?structureType=${encodeURIComponent(detail.registration.structure_type)}`}>{detail.registration.structure_type}</a>{:else}—{/if}</div></div>
-		<div><div class="label">Status</div><div class="value">{#if detail.registration.status_code}<a href={`/towers?status=${detail.registration.status_code}`}>{detail.registration.status_code}</a>{:else}—{/if}</div></div>
+		<div><div class="label">Structure Type <span class="hint" title={fieldHelp('structure_type')}>?</span></div><div class="value">{#if detail.registration.structure_type}<a href={`/towers?structureType=${encodeURIComponent(detail.registration.structure_type)}`}>{detail.registration.structure_type}</a> <CodeHint category="structure_type" code={detail.registration.structure_type} />{:else}—{/if}</div></div>
+		<div><div class="label">Status <span class="hint" title={fieldHelp('status_code')}>?</span></div><div class="value">{#if detail.registration.status_code}<a href={`/towers?status=${detail.registration.status_code}`}>{detail.registration.status_code}</a> <CodeHint category="status_code_tower" code={detail.registration.status_code} />{:else}—{/if}</div></div>
 		<div>
 			<div class="label">Location</div>
 			<div class="value">
@@ -67,8 +70,8 @@
 		<div><div class="label">Height AGL (ft)</div><div class="value">{detail.registration.overall_height_above_ground ?? '—'}</div></div>
 		<div><div class="label">Height AMSL (ft)</div><div class="value">{detail.registration.overall_height_amsl ?? '—'}</div></div>
 		<div><div class="label">Ground Elevation</div><div class="value">{detail.registration.ground_elevation ?? '—'}</div></div>
-		<div><div class="label">Application Purpose</div><div class="value">{detail.registration.application_purpose ?? '—'}</div></div>
-		<div><div class="label">Previous Purpose</div><div class="value">{detail.registration.previous_purpose ?? '—'}</div></div>
+		<div><div class="label">Application Purpose <span class="hint" title={fieldHelp('application_purpose')}>?</span></div><div class="value"><CodeValue category="application_purpose" code={detail.registration.application_purpose} /></div></div>
+		<div><div class="label">Previous Purpose <span class="hint" title={fieldHelp('previous_purpose')}>?</span></div><div class="value"><CodeValue category="application_purpose" code={detail.registration.previous_purpose} /></div></div>
 		<div><div class="label">Date Entered</div><div class="value">{detail.registration.date_entered ?? '—'}</div></div>
 		<div><div class="label">Date Received</div><div class="value">{detail.registration.date_received ?? '—'}</div></div>
 		<div><div class="label">Date Issued</div><div class="value">{detail.registration.date_issued ?? '—'}</div></div>
@@ -77,9 +80,9 @@
 		<div><div class="label">FAA Study #</div><div class="value">{detail.registration.faa_study_number ?? '—'}</div></div>
 		<div><div class="label">FAA Determination Date</div><div class="value">{detail.registration.date_faa_determination_issued ?? '—'}</div></div>
 		<div><div class="label">FAA Circular #</div><div class="value">{detail.registration.faa_circular_number ?? '—'}</div></div>
-		<div><div class="label">Painting/Lighting</div><div class="value">{detail.registration.painting_and_lighting ?? '—'}</div></div>
-		<div><div class="label">Proposed Marking/Lighting</div><div class="value">{detail.registration.proposed_marking_and_lighting ?? '—'}</div></div>
-		<div><div class="label">NEPA Flag</div><div class="value">{detail.registration.nepa_flag ?? '—'}</div></div>
+		<div><div class="label">Painting/Lighting <span class="hint" title={fieldHelp('painting_and_lighting')}>?</span></div><div class="value">{detail.registration.painting_and_lighting ?? '—'}</div></div>
+		<div><div class="label">Proposed Marking/Lighting <span class="hint" title={fieldHelp('proposed_marking_and_lighting')}>?</span></div><div class="value">{detail.registration.proposed_marking_and_lighting ?? '—'}</div></div>
+		<div><div class="label">NEPA Flag <span class="hint" title={fieldHelp('nepa_flag')}>?</span></div><div class="value"><CodeValue category="nepa_flag" code={detail.registration.nepa_flag} /></div></div>
 	</div>
 
 	{#if detail.entities.length > 0}
@@ -91,7 +94,7 @@
 					{#each detail.entities as e}
 						<tr>
 							<td>{e.entity_name}</td>
-							<td>{e.entity_type ?? '—'}</td>
+							<td>{e.entity_type ?? '—'} <CodeHint category="entity_type" code={e.entity_type} /></td>
 							<td>{#if e.frn}<a href={`/identity/frn/${e.frn}`}>{e.frn}</a>{#if $user}<a class="watch-link" href={watchLink('frn', e.frn)}>🔔</a>{/if}{:else}—{/if}</td>
 							<td>
 								{#if e.city}<a href={`/towers?city=${encodeURIComponent(e.city)}`}>{e.city}</a>,{/if}

@@ -246,6 +246,13 @@ volumes for Postgres data and Redis persistence (if enabled). A
     passwordless opt-in notifications.
 34. `homepage-favicon` — Add a themed favicon derived from the same
     visual motif.
+35. `field-definitions-tooltips` — Shared `web/src/lib/fieldDefs.js`
+    registry (+ `CodeValue.svelte`/`CodeHint.svelte` components) mapping
+    coded/abbreviated ULS fields to human descriptions, applied as
+    inline-parenthetical (short) or mouseover-tooltip (long) definitions
+    across the Amateur/Tower detail and browse pages, plus a new
+    `/field-definitions` reference page linked from the footer. Standard
+    to be followed for any future ULS dataset added to the project.
 
 Dependencies: 2 depends on 1; 3 depends on 2; 4 depends on 2,3; 5 depends on 2;
 6 depends on 4,7; 8 depends on 3,4,5,6,7; 9 depends on 8; 11 depends on 9;
@@ -255,6 +262,8 @@ watch/notifier pipeline); 27,28 are independent of each other and of 26;
 29 depends on 27 (reuses the same channel-row UI); 30 depends on 26 (needs
 the `frn` subject type) and is best done after 27; 31 is fully independent.
 33 depends on 32 (embeds the hero component); 34 is independent of both.
+35 is fully independent of all prior items (frontend-only presentation
+layer over already-ingested data).
 
 ## 10. Progress Log
 
@@ -1307,6 +1316,65 @@ commands for a given test run are chained into a single SSH invocation.
   well-formed and matches Dependabot's schema; verification will
   happen naturally the first time Dependabot opens a PR against this
   repo (expected within the first weekly cycle after this lands).
+
+- ✅ `field-definitions-tooltips` — done. Added a shared
+  `web/src/lib/fieldDefs.js` registry (`FIELD_HELP` field-level help
+  text + `CODE_MAPS` code→description tables) plus two components,
+  `CodeValue.svelte` (renders a coded value with its definition
+  attached — inline `code (Description)` for short/single-word
+  descriptions, a mouseover `.hint` tooltip for longer ones, following
+  the existing tooltip pattern already used on the Watches page) and
+  `CodeHint.svelte` (definition-only, for use alongside a value
+  already rendered elsewhere, e.g. inside a link). Unmapped codes
+  always fall back to the raw value, matching the existing
+  `api/app/history_codes.py` precedent.
+
+  Wired into: the Amateur detail page (License Status, Radio Service
+  Code, Entity Type, Applicant Type, Licensee Status, Operator Class,
+  Group Code, Region Code, Trustee Indicator, Vanity Relationship,
+  Systematic/Vanity Callsign Change); the Tower detail page (Structure
+  Type, Status, Application Purpose, Previous Purpose, Painting/
+  Lighting, Proposed Marking/Lighting, NEPA Flag, and the owners/
+  contacts table's Entity Type column); and both browse pages'
+  sortable column headers + status/class/structure-type pills (via a
+  `title=` tooltip, kept compact to avoid breaking table/mobile
+  layout). Added a new `/field-definitions` reference page (linked
+  from the footer) that renders the full registry as a browsable
+  table, grouped by Amateur/Tower.
+
+  Sourcing/verification: cross-checked real distinct production values
+  (via direct `psql` queries against the live database) against two
+  independently-maintained third-party ULS references —
+  `github.com/tgies/uls` (mirrors an actual FCC-published code
+  definitions file, not reverse-engineered, covering License Status,
+  Application Purpose, Entity Type, Applicant Type, Operator Class,
+  and generic Structure Type) and `github.com/lf-connectivity/
+  ISPToolbox` (an independent ASR ingestion script citing the FCC's
+  own `pubacc_asr_codes_data_elem.pdf`, used to correct an earlier
+  best-effort ASR `status_code` guess — `I` is Dismantled, not
+  "Inactive"; `A` is Cancelled, not "Application filed"; the towers
+  browse page's status filter dropdown had the same wrong label and
+  was corrected too). Documented both sources in
+  `docs/fcc-data-reference.md` §7 as go-to references for decoding any
+  future ULS dataset's coded fields.
+
+  Explicitly avoided guessing: `amat_am.vanity_callsign_change` was
+  initially assumed to be a simple Y/N flag, but production data shows
+  6 distinct values (A/B/C/D/E/F) with no located FCC decode table
+  anywhere (neither the FCC's own codes file nor either third-party
+  source enumerates it) — corrected to show the raw code with a field
+  help note stating the FCC does not publish a decode for it, rather
+  than presenting a fabricated mapping as fact. Same treatment applied
+  to `systematic_callsign_change`. A handful of ASR-specific
+  `application_purpose` values observed in production (`OC`, `DI`,
+  `SU`) are similarly left undecoded since they don't appear in the
+  FCC's generic ULS purpose-code list.
+
+  Tested: `npm run build` (via a disposable `node:22-slim` Podman
+  container on `fcculs@10.64.3.39`, matching `web/Dockerfile`'s build
+  stage) succeeded cleanly with the new `fieldDefs.js`/`CodeValue`/
+  `CodeHint`/`field-definitions` route included, confirming no Svelte
+  binding/import errors before this lands on production.
 
 ## 12. Future Features (Deferred)
 

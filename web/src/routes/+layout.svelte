@@ -33,7 +33,7 @@
 	<footer>
 		<p>
 			Data sourced from the FCC Universal Licensing System (ULS) public files. Not affiliated
-			with the FCC.
+			with the FCC. <a href="/field-definitions">Field Definitions</a>
 		</p>
 	</footer>
 </div>

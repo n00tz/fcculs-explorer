@@ -2,6 +2,7 @@
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
 	import { page as pageStore } from '$app/stores';
+	import { fieldHelp, describeCode } from '$lib/fieldDefs.js';
 
 	let callsign = '';
 	let name = '';
@@ -133,8 +134,8 @@
 	<thead>
 		<tr>
 			<th><button class="sort-th" on:click={() => toggleSort('call_sign')}>Callsign{sortIndicator('call_sign')}</button></th>
-			<th><button class="sort-th" on:click={() => toggleSort('license_status')}>Status{sortIndicator('license_status')}</button></th>
-			<th><button class="sort-th" on:click={() => toggleSort('operator_class')}>Class{sortIndicator('operator_class')}</button></th>
+			<th><button class="sort-th" title={fieldHelp('license_status')} on:click={() => toggleSort('license_status')}>Status{sortIndicator('license_status')}</button></th>
+			<th><button class="sort-th" title={fieldHelp('operator_class')} on:click={() => toggleSort('operator_class')}>Class{sortIndicator('operator_class')}</button></th>
 			<th><button class="sort-th" on:click={() => toggleSort('entity_name')}>Licensee{sortIndicator('entity_name')}</button></th>
 			<th><button class="sort-th" on:click={() => toggleSort('city')}>Location{sortIndicator('city')}</button></th>
 			<th><button class="sort-th" on:click={() => toggleSort('grant_date')}>Grant{sortIndicator('grant_date')}</button></th>
@@ -146,13 +147,13 @@
 			<tr>
 				<td><a href={`/amateur/${row.call_sign}`}>{row.call_sign}</a></td>
 				<td>
-					<button class="pill-link" on:click={() => setFilter('status', row.license_status)}>
+					<button class="pill-link" title={describeCode('license_status', row.license_status)} on:click={() => setFilter('status', row.license_status)}>
 						<span class={`pill status-${row.license_status}`}>{row.license_status}</span>
 					</button>
 				</td>
 				<td>
 					{#if row.operator_class}
-						<button class="pill-link" on:click={() => setFilter('class', row.operator_class)}>{row.operator_class}</button>
+						<button class="pill-link" title={describeCode('operator_class', row.operator_class)} on:click={() => setFilter('class', row.operator_class)}>{row.operator_class}</button>
 					{:else}—{/if}
 				</td>
 				<td>{row.entity_name ?? '—'}</td>

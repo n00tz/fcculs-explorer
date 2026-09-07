@@ -192,3 +192,43 @@ in real data), not the originally assumed `'P'`.
   the endpoints are currently active, not permanent values.
 - No rate-limiting observed, but not stress-tested — ingestor should still
   apply retry/backoff.
+
+## 7. Additional high-value third-party code-definition sources
+
+Discovered while researching field-level tooltip/definition support
+(the `web/src/lib/fieldDefs.js` module):
+
+- **`github.com/tgies/uls`** (Rust ULS parser project): mirrors an actual
+  FCC-published code-definitions text file at
+  `fcc-docs/uls_code_definitions_20240718.txt`, covering License Status,
+  Application Purpose/Status, Entity Type, Applicant Type Code, Operator
+  Class Code, and the generic "LO Structure Type" list — a genuine
+  first-party FCC reference, not reverse-engineered. Also has a mirrored
+  copy of `public_access_database_definitions` as
+  `fcc-docs/public_access_database_definitions_sql_20250417.txt` (SQL
+  `CREATE TABLE` statements confirming field names/order/types) and a
+  fully-enumerated Rust `codes.rs` typed representation of the same codes.
+  Treat this repo as the first place to check when decoding any future
+  ULS dataset's coded fields.
+- **`github.com/lf-connectivity/ISPToolbox`**
+  (`webserver/dataUpdate/scripts/update_asr_towers.py`): an independent
+  ASR/Tower ingestion script whose `STATUS_CODES`/`TYPE_MAP` dicts cite
+  the FCC's own `pubacc_asr_codes_data_elem.pdf` as their source —
+  useful because ASR/Tower has no FCC-published record dictionary PDF of
+  its own (see gap noted above), so this is the best corroborating
+  source found for ASR-specific `status_code`/`structure_type` values.
+  Its `STATUS_CODES` mapping corrected an earlier best-effort guess in
+  this project (`I` is **Dismantled**, not "Inactive"; `A` is
+  **Cancelled**, not "Application filed").
+- Some ASR/Tower `application_purpose`/`previous_purpose` values observed
+  in this project's own production data (`OC`, `DI`, `SU`) do **not**
+  appear in the FCC's generic ULS purpose-code list and have no located
+  authoritative decode — deliberately left undecoded (shown as the raw
+  code) in `fieldDefs.js` rather than guessed.
+- `amat_am.systematic_callsign_change` and `.vanity_callsign_change` are
+  declared as plain `char(1)` columns in every schema/definitions source
+  found (no enumerated code list anywhere), yet production data shows
+  `vanity_callsign_change` actually taking 6 distinct values (A/B/E/F/D/C,
+  not a Y/N flag as originally assumed) — corrected to display the raw
+  code with a "not officially documented" field-help note rather than a
+  fabricated decode.

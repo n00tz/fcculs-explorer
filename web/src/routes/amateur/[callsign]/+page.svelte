@@ -3,6 +3,9 @@
 	import { get } from '$lib/api.js';
 	import { onMount } from 'svelte';
 	import { user } from '$lib/auth.js';
+	import CodeValue from '$lib/CodeValue.svelte';
+	import CodeHint from '$lib/CodeHint.svelte';
+	import { fieldHelp } from '$lib/fieldDefs.js';
 
 	let detail = null;
 	let error = '';
@@ -51,8 +54,8 @@
 
 	<h2>License</h2>
 	<div class="card detail-grid">
-		<div><div class="label">Status</div><div class="value">{#if detail.header.license_status}<a href={`/amateur?status=${detail.header.license_status}`}>{detail.header.license_status}</a>{:else}—{/if}</div></div>
-		<div><div class="label">Radio Service Code</div><div class="value">{detail.header.radio_service_code ?? '—'}</div></div>
+		<div><div class="label">Status <span class="hint" title={fieldHelp('license_status')}>?</span></div><div class="value">{#if detail.header.license_status}<a href={`/amateur?status=${detail.header.license_status}`}>{detail.header.license_status}</a> <CodeHint category="license_status" code={detail.header.license_status} />{:else}—{/if}</div></div>
+		<div><div class="label">Radio Service Code <span class="hint" title={fieldHelp('radio_service_code')}>?</span></div><div class="value"><CodeValue category="radio_service_code" code={detail.header.radio_service_code} /></div></div>
 		<div><div class="label">ULS File Number</div><div class="value">{detail.header.uls_file_number ?? '—'}</div></div>
 		<div><div class="label">ULS System ID</div><div class="value">{detail.header.unique_system_identifier}</div></div>
 		<div><div class="label">Grant Date</div><div class="value">{detail.header.grant_date ?? '—'}</div></div>
@@ -68,8 +71,8 @@
 		<div><div class="label">Licensee / Entity</div><div class="value">{detail.entity?.entity_name ?? '—'}</div></div>
 		<div><div class="label">Contact Name</div><div class="value">{[detail.entity?.first_name, detail.entity?.mi, detail.entity?.last_name, detail.entity?.suffix].filter(Boolean).join(' ') || '—'}</div></div>
 		<div><div class="label">FRN</div><div class="value">{#if detail.entity?.frn}<a href={`/identity/frn/${detail.entity.frn}`}>{detail.entity.frn}</a>{#if $user}<a class="watch-link" href={watchLink('frn', detail.entity.frn)}>🔔 Watch this FRN</a>{/if}{:else}—{/if}</div></div>
-		<div><div class="label">Entity Type</div><div class="value">{detail.entity?.entity_type ?? '—'}</div></div>
-		<div><div class="label">Applicant Type</div><div class="value">{detail.entity?.applicant_type_code ?? '—'}</div></div>
+		<div><div class="label">Entity Type <span class="hint" title={fieldHelp('entity_type')}>?</span></div><div class="value"><CodeValue category="entity_type" code={detail.entity?.entity_type} /></div></div>
+		<div><div class="label">Applicant Type <span class="hint" title={fieldHelp('applicant_type_code')}>?</span></div><div class="value"><CodeValue category="applicant_type_code" code={detail.entity?.applicant_type_code} /></div></div>
 		<div><div class="label">Street Address</div><div class="value">{[detail.entity?.street_address, detail.entity?.po_box, detail.entity?.attention_line].filter(Boolean).join(', ') || '—'}</div></div>
 		<div>
 			<div class="label">Location</div>
@@ -83,14 +86,14 @@
 		<div><div class="label">Phone</div><div class="value">{detail.entity?.phone ?? '—'}</div></div>
 		<div><div class="label">Fax</div><div class="value">{detail.entity?.fax ?? '—'}</div></div>
 		<div><div class="label">Email</div><div class="value">{detail.entity?.email ?? '—'}</div></div>
-		<div><div class="label">Status</div><div class="value">{detail.entity?.status_code ?? '—'} {detail.entity?.status_date ? `(${detail.entity.status_date})` : ''}</div></div>
+		<div><div class="label">Status <span class="hint" title={fieldHelp('entity_status_code')}>?</span></div><div class="value">{#if detail.entity?.status_code}{detail.entity.status_code} <CodeHint category="entity_status_code" code={detail.entity.status_code} />{:else}Active{/if} {detail.entity?.status_date ? `(${detail.entity.status_date})` : ''}</div></div>
 	</div>
 
 	<h2>Amateur Details</h2>
 	<div class="card detail-grid">
-		<div><div class="label">Operator Class</div><div class="value">{#if detail.amateur_specific?.operator_class}<a href={`/amateur?class=${detail.amateur_specific.operator_class}`}>{detail.amateur_specific.operator_class}</a>{:else}—{/if}</div></div>
-		<div><div class="label">Group Code</div><div class="value">{detail.amateur_specific?.group_code ?? '—'}</div></div>
-		<div><div class="label">Region Code</div><div class="value">{detail.amateur_specific?.region_code ?? '—'}</div></div>
+		<div><div class="label">Operator Class <span class="hint" title={fieldHelp('operator_class')}>?</span></div><div class="value">{#if detail.amateur_specific?.operator_class}<a href={`/amateur?class=${detail.amateur_specific.operator_class}`}>{detail.amateur_specific.operator_class}</a> <CodeHint category="operator_class" code={detail.amateur_specific.operator_class} />{:else}—{/if}</div></div>
+		<div><div class="label">Group Code <span class="hint" title={fieldHelp('group_code')}>?</span></div><div class="value"><CodeValue category="group_code" code={detail.amateur_specific?.group_code} /></div></div>
+		<div><div class="label">Region Code <span class="hint" title={fieldHelp('region_code')}>?</span></div><div class="value"><CodeValue category="region_code" code={detail.amateur_specific?.region_code} /></div></div>
 		<div>
 			<div class="label">Trustee</div>
 			<div class="value">
@@ -102,7 +105,7 @@
 				{/if}
 			</div>
 		</div>
-		<div><div class="label">Trustee Indicator</div><div class="value">{detail.amateur_specific?.trustee_indicator ?? '—'}</div></div>
+		<div><div class="label">Trustee Indicator <span class="hint" title={fieldHelp('trustee_indicator')}>?</span></div><div class="value"><CodeValue category="trustee_indicator" code={detail.amateur_specific?.trustee_indicator} /></div></div>
 		<div>
 			<div class="label">Previous Callsign</div>
 			<div class="value">
@@ -114,9 +117,9 @@
 				{detail.amateur_specific?.previous_operator_class ? `(class ${detail.amateur_specific.previous_operator_class})` : ''}
 			</div>
 		</div>
-		<div><div class="label">Vanity Relationship</div><div class="value">{detail.amateur_specific?.vanity_relationship ?? '—'}</div></div>
-		<div><div class="label">Systematic Callsign Change</div><div class="value">{detail.amateur_specific?.systematic_callsign_change ?? '—'}</div></div>
-		<div><div class="label">Vanity Callsign Change</div><div class="value">{detail.amateur_specific?.vanity_callsign_change ?? '—'}</div></div>
+		<div><div class="label">Vanity Relationship <span class="hint" title={fieldHelp('vanity_relationship')}>?</span></div><div class="value">{detail.amateur_specific?.vanity_relationship ?? '—'}</div></div>
+		<div><div class="label">Systematic Callsign Change <span class="hint" title={fieldHelp('systematic_callsign_change')}>?</span></div><div class="value">{detail.amateur_specific?.systematic_callsign_change ?? '—'}</div></div>
+		<div><div class="label">Vanity Callsign Change <span class="hint" title={fieldHelp('vanity_callsign_change')}>?</span></div><div class="value">{detail.amateur_specific?.vanity_callsign_change ?? '—'}</div></div>
 	</div>
 
 	{#if detail.related_identities.length > 0}
