@@ -812,6 +812,20 @@ commands for a given test run are chained into a single SSH invocation.
   `/api/admin/*`, but the log-only rotating admin password still gates
   actual admin use.
 
+  > **Correction (added later, see §12b).** The accepted risk recorded
+  > in the preceding paragraph **never actually existed**, and the
+  > statement above is wrong. `web/Caddyfile` proxies only `/api/*` to
+  > the API container, while FastAPI serves its documentation at
+  > `/docs`, `/redoc` and `/openapi.json` — paths Caddy hands to the
+  > SvelteKit SPA fallback instead. Those URLs therefore return the
+  > web app's `index.html` **with a `200`**, not a spec, which is why
+  > the mistake went unnoticed: a status-code-only check sees them as
+  > healthy. `/api/docs` and `/api/openapi.json` return `404`. The
+  > practical consequences are the opposite of what was recorded: no
+  > endpoint shapes are disclosed, there is no live "Try it out" UI,
+  > **and the API has no reachable machine-readable contract at all.**
+  > Making one available is now tracked as a deferred feature in §12b.
+
   **Fixes**: CORS now reads an explicit allow-list from a new
   `FCCULS_CORS_ALLOW_ORIGINS` env var (comma-separated, default
   `https://fcculs-explorer.n00tz.net`), wired through `compose.yaml`,
@@ -1831,6 +1845,8 @@ project's methodology)
   `uvicorn app.main:app`, since the proxy flags are the part most likely
   to break behind Caddy + Cloudflare Tunnel. `/api/healthz` and
   `/openapi.json` both 200; `X-Forwarded-Proto`/`Host` still honored.
+  (Both probed **directly against the container**; `/openapi.json` is
+  not reachable through Caddy — see the correction above and §12b.)
 - **aiosmtplib 3 → 5** — the largest risk, being a double-major bump
   whose only existing coverage (`tests/test_mailer.py`) is fully mocked
   and therefore validates the *call*, not the real signature or wire
@@ -2280,6 +2296,60 @@ open gap was stale and has been corrected.
 Redeploy required: `web` (Caddyfile and the baked-in `/help` guide), plus
 the new `mcp` unit.
 
+### Swagger / OpenAPI compatibility — investigated, documented, not built
+
+Investigated what "make the API Swagger compatible" would require. The
+user's decision was to **record the design as a deferred feature rather
+than build it**, so this round changed documentation only — no code, no
+image rebuild, no deploy. The design lives in §12b; this entry records
+what was actually measured, because a deferred design gets read much
+later by someone who will reasonably trust it without re-checking.
+
+Everything below was probed against the running production stack, not
+inferred from the source:
+
+- **The generated docs are unreachable, and a previously recorded
+  "accepted risk" was wrong.** The security-hardening entry above stated
+  that `/docs`, `/redoc` and `/openapi.json` were deliberately left
+  public. They are not public and never were: `web/Caddyfile` proxies
+  only `/api/*`, so those paths fall through to the SvelteKit SPA and
+  return its `index.html` **with a `200`**. Fetching the body rather than
+  trusting the status code is what exposed this. `/api/docs` and
+  `/api/openapi.json` return `404`. That paragraph now carries an inline
+  correction.
+- **`FastAPI(openapi_version="3.0.3")` is silently ignored** on the
+  deployed FastAPI 0.141 — constructed in the real `api` image, it still
+  reported `3.1.0` and still emitted `anyOf: [{"type":"string"},
+  {"type":"null"}]`. This matters disproportionately: it is the obvious
+  one-line implementation, it fails without erroring, and assuming it
+  works would have produced a spec that lies about its own version.
+- **A 3.0.3 downgrade is mechanical, not lossy.** Inventorying every key
+  in the real 35 KB document showed the *only* 3.1-specific construct is
+  the nullable idiom — 61 `anyOf` members of `{"type": "null"}`. No
+  `const`, `prefixItems`, type-arrays, `examples`, `exclusiveMinimum` or
+  `contentMediaType`. A prototype transform run against the real spec
+  converted all 61 to `nullable: true`, left **zero** residual
+  `"type": "null"`, and preserved all 34 paths and every component
+  schema.
+- **The spec is structurally thin.** 18 of 26 `GET` endpoints declare a
+  completely untyped `{}` `200` response — every detail endpoint,
+  `search`, both `identity` endpoints, `field-definitions`, `watches`,
+  `channels`, `auth/me` and `healthz`. `Page.items` is `array of {}`, so
+  even the typed endpoints stop at the wrapper. There are no
+  `securitySchemes` despite cookie-based user *and* admin sessions, and
+  only `200`/`422` are documented although `404` and `429` were both
+  observed firing live during the MCP work.
+
+One verification could **not** be completed and is deliberately left as
+an acceptance criterion rather than being written up as settled: the
+downgraded document was never checked by an independent validator
+(`openapi-spec-validator`), because installing it was out of scope for a
+documentation-only change. "No residual 3.1 constructs" is a weaker claim
+than "a real validator accepts it," and §12b's testing section requires
+closing that gap before the 3.0 document is considered done.
+
+No redeploy required — documentation only.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
@@ -2297,6 +2367,13 @@ so they aren't lost or accidentally reinvented differently later:
   See "§12a. MCP Server" below for the design, and the
   "2026-09-07 — MCP server built, tested, and live" Progress Log entry for
   what actually changed versus the plan.
+- **A Swagger/OpenAPI-compatible published API contract** — the API is
+  FastAPI, so a spec is generated internally, but none of it is reachable
+  through Caddy today and the document that *is* generated is too thin to
+  be useful to third-party tooling (18 of 26 `GET` endpoints declare an
+  untyped `{}` response, there are no security schemes, and only
+  `200`/`422` are documented). See "§12b. Swagger / OpenAPI Compatibility"
+  below for the verified findings and design. **Not built.**
 
 ## 12a. MCP Server — Design (BUILT — live at `/mcp`)
 
@@ -2724,3 +2801,273 @@ source rather than assumed:
 - **Confirm the `/mcp` → `/mcp/` redirect resolves over HTTPS**, since
   a missing `--proxy-headers` produces a redirect that MCP clients
   deliberately refuse to follow.
+
+## 12b. Swagger / OpenAPI Compatibility — Design (NOT BUILT)
+
+**Status: deferred.** Nothing in this section is implemented. It is a
+design record so the work can be picked up later without redoing the
+investigation. The findings below were measured against the running
+production stack; see the Progress Log entry "Swagger / OpenAPI
+compatibility — investigated, documented, not built" for how.
+
+> **Read this first if you are picking the work up.** Two premises here
+> are version- and configuration-dependent and must be re-verified before
+> any code is written, because if either has changed the design changes
+> with it:
+>
+> 1. **That FastAPI still ignores `openapi_version`.** If a newer release
+>    honours it, the entire `swagger-openapi-30-endpoint` todo collapses
+>    to a one-line constructor argument.
+> 2. **That `web/Caddyfile` still proxies only `/api/*`.** If it gained
+>    broader routes, the "the docs are unreachable" premise no longer
+>    holds.
+
+### The problem
+
+The API is FastAPI, so an OpenAPI document exists internally. "Swagger
+compatible" still is not satisfied, for four independent reasons.
+
+**1. The docs are not reachable at all.** Caddy proxies only `/api/*`,
+while FastAPI serves its docs at root paths, so:
+
+| URL | Status | What actually comes back |
+|---|---|---|
+| `/openapi.json` | **200** | SvelteKit `index.html` |
+| `/docs` | **200** | SvelteKit `index.html` |
+| `/api/openapi.json` | 404 | — |
+| `/api/docs` | 404 | — |
+
+The `200`s are why this went unnoticed. Any check that asserts on status
+codes alone reports these as healthy.
+
+**2. The spec is OpenAPI 3.1.0.** Swagger UI 5+ reads it, but Swagger 2.0
+tooling, many codegen targets, and gateways such as AWS API Gateway and
+Azure APIM do not.
+
+**3. The obvious fix does not work.** `FastAPI(openapi_version="3.0.3")`
+is silently ignored on 0.141 — see the warning above.
+
+**4. The document is structurally thin.**
+
+- 18 of 26 `GET` endpoints declare a completely untyped `{}` `200`:
+  every detail endpoint, `search`, both `identity` endpoints,
+  `field-definitions`, `watches`, `channels`, `auth/me`, `admin/me`,
+  `healthz`.
+- `Page.items` is `array of {}`, so even the eight "typed" endpoints stop
+  at the pagination wrapper.
+- No `securitySchemes`, despite cookie-based user *and* admin sessions
+  (`api/app/deps.py` reads `settings.session_cookie_name` and
+  `settings.admin_session_cookie_name`).
+- Only `200`/`422` documented; the real `401`, `403`, `404` and `429`
+  appear nowhere.
+- `info.description` empty; no `servers`, contact, licence, or top-level
+  `tags` metadata.
+- Auto-derived summaries are poor ("By Frn", "Detail", "Healthz") and
+  operationIds are codegen-hostile (`search_api_search_get`).
+
+### Scope decided with the user
+
+- Keep 3.1 as the primary spec **and additionally publish 3.0.3**.
+- Docs public, but **`/api/admin/*` hidden** from the published document.
+- **Full** quality: response models everywhere, error responses, security
+  schemes, descriptions, examples.
+- **"Try it out" enabled** against production.
+
+### Design
+
+#### Routing — fix by moving the doc URLs, not by editing Caddy
+
+```python
+app = FastAPI(
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+    ...
+)
+```
+
+This needs **no Caddyfile change**, which is the point. It keeps all API
+surface under one prefix, inherits the existing `/api/*` proxy and the
+global security-header block, cannot collide with a future SPA route
+named `/docs`, and leaves alone the one file that has previously taken
+the whole `web` container down when it was wrong.
+
+Swagger UI then fetches `/api/openapi.json` same-origin, so **no CORS
+entry is needed**. Use `servers: [{"url": "/"}]` — a *relative* server URL
+deliberately, so "Try it out" targets whatever host is serving the page.
+Hardcoding `PUBLIC_BASE_URL` would make a dev instance's "Try it out"
+silently fire requests at production.
+
+#### Hiding admin, with a reversible toggle
+
+Drive `include_in_schema` on the admin router from a new
+`FCCULS_OPENAPI_INCLUDE_ADMIN` setting, default `false`. Documentation
+only — the routes stay functional either way. A setting rather than a
+hardcoded `False` because an internal instance may legitimately want the
+admin surface documented, and flipping `.env` is cheaper than a code
+change plus rebuild. Note this is not a security control; admin is
+password-gated and obscurity was never the mechanism.
+
+#### Response models — generated from the schema, not hand-transcribed
+
+This is the largest and most failure-prone part. Detail endpoints
+`SELECT *` against wide FCC tables (`amat_hd` alone has 59 columns;
+there are 29 `CREATE TABLE` statements). Hand-writing Pydantic models for
+those would duplicate the entire database schema in Python and guarantee
+silent drift.
+
+This project already solved exactly this problem: `scripts/gen_field_defs.py`
+generates `api/app/field_defs.py` from a single source and ships a
+`--check` drift gate, precisely because hand-transcription drifts. Follow
+that precedent:
+
+- **New `scripts/gen_row_models.py`** parses the `CREATE TABLE IF NOT
+  EXISTS` blocks in `db/*.sql` — which are explicitly typed (`BIGINT`,
+  `TEXT`, `DATE`, `BOOLEAN`, `TIMESTAMPTZ`, `NUMERIC`) — and emits
+  `api/app/row_models.py`, one model per table with every column optional,
+  since a `LEFT JOIN` or absent section legitimately yields nulls.
+- **`--check` mode** wired into the API test run so staleness fails the
+  build.
+- The migrations are the right source of truth: they are literally what
+  `SELECT *` returns.
+
+**Hand-written envelope models** then compose those generated row models.
+These are hand-written on purpose — they are an API design decision, not
+a reflection of the schema:
+
+| Endpoint | Envelope |
+|---|---|
+| `/api/amateur/{call_sign}` | `header`, `entity`, `amateur_specific`, `history[]`, `change_log[]`, `related_identities[]` |
+| `/api/towers/{registration_number}` | `registration`, `entities[]`, `coordinates[]`, `history[]`, `change_log[]`, `related_by_site[]`, `related_by_frn[]` |
+| `/api/gmrs\|aircraft\|ship/{call_sign}` | built from `personal_services.py`'s `SERVICE_CONFIGS`/`DetailSection` list, so the models stay generated from the same config the routes are |
+| `/api/search` | `query`, `results[]` of `{result_type, key, label, unique_system_identifier, score}` |
+| `/api/identity/frn/{frn}` | `frn`, `members[]` of `{source, subject_key, entity_name, licensee_id}` |
+| `/api/identity/address` | `address_key`, `members[]` |
+| `/api/history`, `/api/new-hams` | typed `items[]` on the existing `Page`/`NewHamsPage` |
+| `watches`, `channels`, `auth/me`, `healthz` | small hand-written models |
+
+Two details worth getting right rather than discovering late:
+
+- Make `Page` generic. `Page[AmateurRow]` gives each browse endpoint a
+  distinct component schema instead of one shared untyped `Page`.
+- Amateur history rows carry a `code_description` field that is **not** a
+  database column — `amateur.py` injects it from `describe_history_code`.
+  A naive "the model is just the table" assumption drops it.
+
+#### Error responses and security schemes
+
+- A shared `responses={...}` mapping applied per-router for the codes each
+  router *actually* raises — `429` on rate-limited public reads, `404` on
+  detail lookups, `401`/`403` on authenticated routes — rather than a
+  blanket copy-paste onto every operation.
+- `securitySchemes` declaring two `apiKey`-in-`cookie` schemes named from
+  `settings.session_cookie_name` and `settings.admin_session_cookie_name`,
+  applied only to routes that require them.
+
+#### The 3.0.3 document
+
+New `GET /api/openapi-3.0.json` returning a transformed copy:
+
+- Recursively rewrite `anyOf: [X, {"type":"null"}]` → `X` +
+  `nullable: true`.
+- **For a `$ref` variant the `$ref` must be wrapped in `allOf`**, because
+  in 3.0 a sibling key alongside `$ref` is ignored. The current spec has
+  no nullable `$ref` — but adding response models *creates* them, so this
+  case must be handled before it appears, not after it silently produces
+  a wrong spec.
+- Cache the result alongside FastAPI's own `app.openapi()` cache rather
+  than recomputing per request.
+- Swagger UI keeps pointing at the 3.1 document; the 3.0 one is for
+  external tooling and is linked from the docs description.
+
+### Testing (when this is built)
+
+Real tests in disposable containers, then live verification, per this
+project's methodology:
+
+- **New `api/tests/test_openapi.py`**: every operation has a non-empty
+  summary and description; no auto-generated `_api_..._get` operationIds
+  and all are unique; **no `200` response has an empty schema** — the
+  regression gate for the biggest gap, which would fail for 18 endpoints
+  today; `/api/admin/*` absent by default and present when the setting is
+  enabled; `securitySchemes` exist and are referenced; the downgraded
+  document contains no `"type": "null"` and its `paths`/`components`
+  counts match the 3.1 document exactly, so nothing is silently dropped.
+- **Independent validation** with `openapi-spec-validator` as a test
+  dependency, asserting the 3.1 document validates as 3.1 **and** the
+  downgraded one validates as 3.0. This is the acceptance criterion for
+  the 3.0 deliverable. The prototype confirmed the transform leaves no
+  residual 3.1 constructs, but that is a weaker claim than a real
+  validator accepting it, and the gap must be closed rather than assumed
+  away.
+- **`scripts/gen_row_models.py --check`** in the API test script.
+- **Live verification**: `/api/docs` and `/api/redoc` return real
+  Swagger/ReDoc HTML — asserting on **body content, not status codes**,
+  since the SPA fallback returning `200` is exactly what made this look
+  healthy while being broken; both spec URLs report the right `openapi`
+  version; a real "Try it out" call against `/api/search` succeeds from
+  the browser; `/api/admin/*` is absent from the published document.
+
+### Files this would touch
+
+- `api/app/main.py` — doc URLs, metadata, `servers`, tag metadata, custom
+  `generate_unique_id_function`, the 3.0 endpoint.
+- `api/app/config.py` — `openapi_include_admin`.
+- `api/app/openapi_compat.py` *(new)* — the downgrade transform.
+- `api/app/row_models.py` *(new, generated)*, `api/app/schemas.py` *(new)*.
+- `api/app/pagination.py` — make `Page` generic.
+- `api/app/routers/*.py` — `response_model`, summaries, docstrings,
+  `responses`, security; `admin.py` gets the schema toggle.
+- `scripts/gen_row_models.py` *(new)*.
+- `api/tests/test_openapi.py` *(new)*, `api/tests/run_integration.sh`,
+  `api/requirements.txt` (test-only validator dependency).
+- `.env.example`, `README.md`, `docs/architecture.md`, `docs/plan.md`.
+- **No `web/Caddyfile` change** — deliberately.
+
+Rebuild scope when built: the **`api`** image only. `web` is untouched.
+
+### Todos (all `blocked` until this is greenlit)
+
+- `swagger-docs-routing` — Move `docs_url`/`redoc_url`/`openapi_url` under
+  `/api/`, add `servers`, confirm reachability by asserting on body
+  content rather than status code.
+- `swagger-app-metadata` — `info.description`, contact/licence, top-level
+  tag descriptions sourced from the existing router module docstrings,
+  clean `operationId` generation, real summaries per route.
+- `swagger-admin-hiding` — `FCCULS_OPENAPI_INCLUDE_ADMIN` (default off)
+  driving `include_in_schema` on the admin router.
+- `swagger-security-schemes` — Cookie `securitySchemes` for user and admin
+  sessions, applied to the routes that need them.
+- `swagger-error-responses` — Document the real `401`/`403`/`404`/`429`
+  responses per router.
+- `swagger-row-models-generator` — `scripts/gen_row_models.py` deriving
+  `api/app/row_models.py` from `db/*.sql`, with a `--check` drift gate.
+- `swagger-response-models` — Generic `Page[T]` plus hand-written envelope
+  models; `response_model` on every endpoint, including the non-column
+  `code_description` field.
+- `swagger-openapi-30-endpoint` — `api/app/openapi_compat.py` +
+  `GET /api/openapi-3.0.json`, handling the `$ref`-in-`allOf` nullable
+  case.
+- `swagger-tests` — `api/tests/test_openapi.py` plus
+  `openapi-spec-validator` asserting both documents validate.
+- `swagger-docs-update` — README/architecture updates and a Progress Log
+  entry, once the feature actually ships.
+
+Dependencies: `swagger-response-models` depends on
+`swagger-row-models-generator`; `swagger-openapi-30-endpoint` depends on
+`swagger-response-models` (the `$ref` nullable case only appears once
+response models exist); `swagger-tests` depends on all of the above;
+`swagger-docs-update` comes last. The remaining five are mutually
+independent.
+
+### Notes
+
+- Enabling "Try it out" publicly makes `POST /api/auth/request-link`
+  callable from the docs UI. It is already rate-limited (5/hour per
+  email+IP) and already callable by any HTTP client, so this changes
+  convenience, not exposure — stated explicitly rather than left implied.
+- The generated row models describe **raw FCC columns**. They are not the
+  decoded, tooltipped values the frontend and MCP server present;
+  `describe_code` remains the way to interpret codes, and the OpenAPI
+  descriptions should say so rather than implying the raw values are
+  self-explanatory.
