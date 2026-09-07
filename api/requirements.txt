@@ -7,7 +7,7 @@ email-validator==2.*
 itsdangerous==2.*
 aiosmtplib==3.*
 httpx==0.28.*
-redis==5.*
+redis==8.*
 rq==1.*
 pytest==9.*
 pytest-asyncio==1.4.*
