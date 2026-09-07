@@ -1282,6 +1282,32 @@ commands for a given test run are chained into a single SSH invocation.
   `cache: pip`/`cache: npm` dependency caches are warm after the first
   run.
 
+- ✅ `dependabot-config` — done. Added `.github/dependabot.yml` with
+  eight entries, all on a weekly schedule: `pip` for `/api`,
+  `/notifier`, and `/ingestor` (each has its own `requirements.txt`,
+  and Dependabot's `pip` ecosystem doesn't recurse into
+  subdirectories, so each needs its own `directory:` entry); `npm` for
+  `/web`; and `docker` for `/api`, `/notifier`, `/ingestor`, and
+  `/web` (one entry per Dockerfile-containing directory) so floating
+  base-image tags (`python:3.12-slim`, `node:22-slim`,
+  `postgres:16-alpine`, `redis:7-alpine`, `caddy:2-alpine`) get
+  flagged when a new upstream patch/security release lands — a
+  locally cached build won't pick that up on its own since the tag
+  itself doesn't change, only its underlying digest.
+
+  Documented in README.md's Development / Testing Methodology section
+  that Dependabot PRs are **not** to be auto-merged: they go through
+  the same review/merge path as any other change, then require a real
+  `deploy/update.sh --force` run plus a smoke test on production
+  before being trusted — base-image bumps in particular can carry
+  OS-level behavior changes a code review alone wouldn't catch.
+
+  This is a config-only change (no code path exercised), so there is
+  no "real infra" test to run beyond confirming the YAML is
+  well-formed and matches Dependabot's schema; verification will
+  happen naturally the first time Dependabot opens a PR against this
+  repo (expected within the first weekly cycle after this lands).
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

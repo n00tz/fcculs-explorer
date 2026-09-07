@@ -392,6 +392,19 @@ those stay part of the manual `run_integration.sh` methodology above and
 are still required before considering any change done; CI complements that
 process, it doesn't replace it.
 
+**Dependabot (`.github/dependabot.yml`)** checks weekly for updates to
+each service's Python (`api`/`notifier`/`ingestor`) and npm (`web`)
+dependencies, plus each service's Dockerfile base image (so a floating
+tag like `python:3.12-slim`/`node:22-slim`/`postgres:16-alpine`/
+`redis:7-alpine`/`caddy:2-alpine` gets flagged when a new upstream
+patch/security release lands — a locally cached image won't surface
+that on its own). Dependabot PRs are **not** auto-merged: review and
+merge them the same way as any other change, then run
+`deploy/update.sh --force` and smoke-test the result on production
+before trusting a dependency/base-image bump — this is especially
+important for base-image bumps, which can carry OS-level behavior
+changes that a plain code review won't catch.
+
 ## License / Attribution
 
 FCC ULS data (Amateur Radio Service and Antenna Structure Registration

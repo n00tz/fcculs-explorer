@@ -1,0 +1,50 @@
+version: 2
+updates:
+  # Python dependencies -- each service has its own requirements.txt,
+  # so each gets its own directory entry (Dependabot doesn't recurse).
+  - package-ecosystem: "pip"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/notifier"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/ingestor"
+    schedule:
+      interval: "weekly"
+
+  # SvelteKit frontend dependencies.
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+
+  # Dockerfile base images (python:3.12-slim, node:22-slim,
+  # postgres:16-alpine, redis:7-alpine, caddy:2-alpine, etc.) -- these
+  # tags float, so a locally cached build won't pick up a new
+  # patch/security release upstream on its own. One entry per
+  # Dockerfile-containing directory since Dependabot's docker ecosystem
+  # only scans a single Dockerfile per directory entry.
+  - package-ecosystem: "docker"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/notifier"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/ingestor"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
