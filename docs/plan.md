@@ -2374,6 +2374,36 @@ so they aren't lost or accidentally reinvented differently later:
   untyped `{}` response, there are no security schemes, and only
   `200`/`422` are documented). See "§12b. Swagger / OpenAPI Compatibility"
   below for the verified findings and design. **Not built.**
+- **Address normalization for identity grouping** — `entities_by_address`
+  builds its `address_key` from nothing but
+  `lower(trim(street_address))|lower(trim(city))|upper(trim(state))|left(zip_code,5)`
+  (`db/009_identity_views_all_services.sql:46-85`), so any spelling or
+  abbreviation variant silently splits one household into separate
+  groups. **Confirmed against live production data, not hypothesised**: a
+  married couple at one address returns two disjoint single-member
+  groups, because the FCC free-text values differ in three ways at once —
+
+  | Stored value | `address_key` |
+  |---|---|
+  | `509 Mt View Dr`, `Tunnell Hill` | `509 mt view dr\|tunnell hill\|GA\|30755` |
+  | `509 Mountain View Drive`, `Tunnel Hill` | `509 mountain view drive\|tunnel hill\|GA\|30755` |
+
+  `Mt`/`Mountain`, `Dr`/`Drive`, and a misspelled city (`Tunnell`). The
+  failure is **silent** — the affected detail page shows an empty
+  "related identities" panel that looks identical to a genuinely
+  unrelated licensee, so nobody is prompted to doubt it. Note the
+  equivalent FRN-based grouping is unaffected and worked correctly for
+  the same records; this is specific to the address path.
+
+  A fix would normalize before hashing: expand USPS street-suffix and
+  directional abbreviations (`Dr`→`Drive`, `Mt`→`Mountain`, `N`→`North`),
+  strip punctuation, and — since the city name itself can be misspelled
+  while the ZIP is authoritative — consider dropping `city` from the key
+  entirely and relying on `zip5` + normalized street, which would have
+  grouped the pair above correctly. Worth measuring the false-*merge*
+  rate before committing to that, since apartment/unit numbers live in
+  the same free-text field and over-normalizing could group unrelated
+  neighbours in one building. **Not built.**
 
 ## 12a. MCP Server — Design (BUILT — live at `/mcp`)
 
