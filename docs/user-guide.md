@@ -87,8 +87,9 @@ the site can do, even before you search for anything:
 - Below the search box is the **🎉 New Hams** section — see the next
   part of this guide.
 - Below that is a row of three cards explaining, in a nutshell, what you
-  can do here: **Browse & search**, **Discover related identities**, and
-  **Get notified — no password required**.
+  can do here: **Browse & discover related identities**, **Get notified —
+  no password required**, and **Ask an AI assistant** (which links to
+  [Using this site with an AI assistant](#using-this-site-with-an-ai-assistant)).
 
 ## 🎉 New Hams: celebrating brand-new licenses
 

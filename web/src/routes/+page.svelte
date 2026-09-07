@@ -124,7 +124,8 @@
 			callsigns, club trustees, shared tower sites, and every service a single FRN holds),
 			and watch anything that matters to you — no password required. Sign in with just an
 			email and get alerts by email, SMS, or webhook the moment a daily FCC update touches
-			your callsign, FRN, or tower.
+			your callsign, FRN, or tower. Prefer to just ask? Connect an AI assistant over MCP
+			and query it all in plain English.
 		</p>
 	</div>
 	<HeroGraphic />
@@ -228,17 +229,11 @@
 
 <div class="feature-grid">
 	<div class="card feature-card">
-		<h3>🔎 Browse &amp; search</h3>
+		<h3>🕸️ Browse &amp; discover related identities</h3>
 		<p>
-			Paginated tables for every service we cover — Amateur Radio, GMRS, Aircraft, Ship, and
-			Tower Structures — with click-to-sort columns and partial-match filters on every
-			displayed field: city, state, name, callsign, N-number, ship name, MMSI, and more.
-		</p>
-	</div>
-	<div class="card feature-card">
-		<h3>🕸️ Discover related identities</h3>
-		<p>
-			Detail pages cross-link by FRN, licensee, and site so you can traverse the full history
+			Paginated, click-to-sort tables for every service — Amateur, GMRS, Aircraft, Ship and
+			Tower Structures — with partial-match filters on every displayed field. Detail pages
+			cross-link by FRN, licensee, and site so you can traverse the full history
 			behind a callsign — previous callsigns tied to the same FRN, club trustees, and towers
 			sharing a location — without falling back to a search box every time. Because grouping
 			spans services, one FRN lookup shows a person's whole FCC footprint: their ham licence,
@@ -252,6 +247,23 @@
 			registration number, or FRN (even before you've been assigned a callsign) for changes.
 			Choose email, SMS via your carrier's gateway, or a webhook (ntfy, Discord, Telegram,
 			Matrix, or generic) — and send yourself a test alert first to confirm it arrives.
+		</p>
+	</div>
+	<div class="card feature-card">
+		<h3>🤖 Ask an AI assistant</h3>
+		<p>
+			Connect an MCP-capable assistant — Claude Desktop, Copilot CLI, and others — to
+			<code>/mcp</code> and ask in plain English instead of clicking through tables:
+			<em>"How many active hams are in Ringgold, GA?"</em> or
+			<em>"Show me everything the FCC has under this FRN."</em> It can search, browse, read
+			any license or tower, follow FRN and address groupings, explain FCC codes, and pull
+			change history — across every service on this site.
+		</p>
+		<p>
+			It's <strong>read-only</strong>, sees only the same public data you can already browse,
+			and needs no account or API key. <a href="/help#using-this-site-with-an-ai-assistant"
+				>How to connect your assistant →</a
+			>
 		</p>
 	</div>
 </div>

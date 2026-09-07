@@ -2350,6 +2350,57 @@ closing that gap before the 3.0 document is considered done.
 
 No redeploy required — documentation only.
 
+### Homepage: MCP surfaced as a first-class feature
+
+The MCP server had been live at `/mcp` since §12a and fully documented in
+`docs/user-guide.md`, but the homepage never mentioned it — so the only
+people who could discover it were those already reading the help page.
+The user's call was that it belongs at the same level as the notification
+service, and that the **"🔎 Browse & search"** card should give up its
+slot for it.
+
+What changed (`web/src/routes/+page.svelte`, `web/src/app.css`,
+`docs/user-guide.md`):
+
+- **New "🤖 Ask an AI assistant" card**, placed last so the grid reads
+  browse → notify → ask. It names the transport (`/mcp`), gives two
+  concrete example questions, and enumerates what the tools actually do —
+  each claim checked against the live tool list rather than written from
+  memory: search, browse, license/tower detail, FRN **and address**
+  grouping, `describe_code`, and change history. It states plainly that
+  the server is read-only, exposes only already-public data, and needs no
+  account or key, then links to
+  `/help#using-this-site-with-an-ai-assistant` for setup.
+- **The removed card's content was folded into its neighbour** rather
+  than dropped. Deleting "Browse & search" outright would have taken the
+  only mention of sortable columns and per-field filters off the homepage,
+  so the identity card became **"🕸️ Browse & discover related
+  identities"** and absorbed that sentence.
+- **The hero paragraph** gained a closing clause so all three pillars are
+  still previewed above the fold.
+- **`.feature-card p + p`** — the existing rule is `p { margin: 0 }`,
+  which assumed one paragraph per card. The AI card is the first with
+  two, so without this the paragraphs butt together. `.feature-card code`
+  mirrors `.markdown-body code`, since no global `code` style exists.
+- **`docs/user-guide.md`'s "The home page"** section enumerated the three
+  cards by name and would have gone stale immediately; it now lists the
+  new set and cross-links the AI-assistant section.
+
+Verified with a real `vite build` in a disposable `node:26-slim`
+container on the host (matching `web/Dockerfile`'s build stage), which is
+non-negotiable here — an invalid Svelte binding once shipped a silently
+stale production image in this project. **A green build was explicitly
+not treated as sufficient**: the homepage is not prerendered (`grep` for
+existing card text in `build/index.html` returns nothing — it's an SPA
+shell), so the built JS chunk was searched directly. Confirmed in
+`_app/immutable/nodes/2.*.js`: the new card text and the
+`using-this-site-with-an-ai-assistant` anchor are present, the old
+"Browse & search" string is gone from every chunk, and both new CSS rules
+are in the emitted stylesheet.
+
+Redeploy required — this is a web change, and `docs/user-guide.md` is
+baked into the web image at build time.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

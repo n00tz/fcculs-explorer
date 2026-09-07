@@ -440,6 +440,18 @@ tr:hover td {
 	color: var(--text-dim);
 	font-size: 0.9rem;
 }
+/* The AI-assistant card runs to a second paragraph; every other rule here
+   assumes a single one, so restore the spacing that `margin: 0` removes. */
+.feature-card p + p {
+	margin-top: 0.6rem;
+}
+.feature-card code {
+	background: var(--surface-alt);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 0.05rem 0.35rem;
+	font-size: 0.85em;
+}
 
 .new-hams-widget {
 	margin: 1.5rem 0;
