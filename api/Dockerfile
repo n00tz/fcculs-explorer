@@ -1,5 +1,5 @@
 # FastAPI service: search/browse/detail/identity/watch/channel/auth endpoints.
-FROM docker.io/library/python:3.12-slim AS base
+FROM docker.io/library/python:3.14-slim AS base
 
 WORKDIR /app
 

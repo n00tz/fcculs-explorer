@@ -3,7 +3,7 @@
 # queued deliveries) and a dispatcher (`python -m app.dispatch`, matches
 # new change_events to active watches and enqueues jobs; run on a loop or
 # short interval by the compose command / an external timer).
-FROM docker.io/library/python:3.12-slim AS base
+FROM docker.io/library/python:3.14-slim AS base
 
 WORKDIR /app
 

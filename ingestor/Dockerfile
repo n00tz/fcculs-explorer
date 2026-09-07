@@ -1,6 +1,6 @@
 # Ingestor service: downloads FCC daily/weekly ULS files, parses, diffs,
 # and upserts into Postgres, on a daily APScheduler-driven cron.
-FROM docker.io/library/python:3.12-slim AS base
+FROM docker.io/library/python:3.14-slim AS base
 
 WORKDIR /app
 
