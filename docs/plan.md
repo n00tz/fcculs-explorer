@@ -1861,6 +1861,17 @@ live smoke test, per README's Development / Testing Methodology rule
 that dependency and base-image bumps get the same live verification as
 any other change and are never auto-merged.
 
+README's Software Bill of Materials was updated to match — that section
+is hand-maintained and had gone stale on all five api pins, which is
+exactly the drift it exists to prevent. An audit of every other SBOM
+entry against its real manifest (`ingestor`/`notifier` requirements,
+`web/package.json`, all Dockerfile/compose base-image tags) found no
+other mismatches. The api entry also gained two standing notes: that
+`starlette` arrives transitively via fastapi (so a major change there
+can land without appearing in any Dependabot PR title), and that `rq`/
+`psycopg` must be bumped in lockstep with `notifier`, citing the skew
+found in this round.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

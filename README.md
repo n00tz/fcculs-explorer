@@ -51,10 +51,22 @@ is tracked automatically by `.github/dependabot.yml`'s `docker` entries):
 | `redis:7-alpine` | `redis` service (`compose.yaml`) |
 
 **`api/requirements.txt`** — FastAPI backend:
-`fastapi==0.115.*`, `uvicorn[standard]==0.30.*`, `psycopg[binary]==3.2.*`,
+`fastapi==0.141.*`, `uvicorn[standard]==0.52.*`, `psycopg[binary]==3.3.*`,
 `psycopg-pool==3.3.*`, `pydantic-settings==2.*`, `email-validator==2.*`,
-`itsdangerous==2.*`, `aiosmtplib==3.*`, `httpx==0.28.*`, `redis==8.*`,
-`rq==1.*`, `pytest==9.*`, `pytest-asyncio==1.4.*`
+`itsdangerous==2.*`, `aiosmtplib==5.*`, `httpx==0.28.*`, `redis==8.*`,
+`rq==2.*`, `pytest==9.*`, `pytest-asyncio==1.4.*`
+
+`fastapi` also pulls in `starlette` transitively (currently 1.6.0), which
+is what actually provides the CORS/session middleware the security
+hardening relies on — worth knowing when reviewing a FastAPI bump, since
+a major `starlette` change can arrive without appearing in any
+Dependabot PR title.
+
+Note that `rq` and `psycopg[binary]` must stay compatible with the
+versions pinned in `notifier/requirements.txt` below: `api` enqueues jobs
+onto the same Redis queue the `notifier` worker consumes, by string path
+across a container boundary. The two drifted apart once already (api on
+`rq==1.*` while notifier was on `rq==2.12.*`); bump them together.
 
 **`ingestor/requirements.txt`** — FCC file downloader/parser + scheduler:
 `httpx>=0.28.1`, `psycopg[binary]>=3.3.5`, `apscheduler>=3.11.3`, `pytest>=9.1.1`
