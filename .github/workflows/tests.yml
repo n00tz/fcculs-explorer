@@ -87,6 +87,70 @@ jobs:
           # notifier/tests/run_integration.sh):
           #   integration_test.py
 
+  mcpsrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12 to match the api and notifier jobs above. mcpsrv's own
+          # Dockerfile runs python:3.14-slim, so CI is deliberately a
+          # version behind the runtime image -- but that same gap already
+          # exists for api/notifier (both also 3.12 here against 3.14
+          # images), so this keeps the established pattern rather than
+          # introducing a fourth inconsistency. Verified: mcp==2.2.* and
+          # httpx2==2.12.* both install and all 12 tests pass on 3.12.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: mcpsrv/requirements.txt
+
+      - name: Install dependencies
+        # pytest is NOT in mcpsrv/requirements.txt (unlike api's and
+        # notifier's), because that file is installed straight into the
+        # production image by mcpsrv/Dockerfile -- adding a test-only
+        # dependency there would ship it to production and into the SBOM.
+        # mcpsrv/tests/run_integration.sh installs pytest separately for
+        # the same reason; this mirrors it, pinned to the ==9.* the other
+        # two services use.
+        run: |
+          pip install -r mcpsrv/requirements.txt
+          pip install "pytest==9.*"
+
+      - name: Symlink mcpsrv/ to /app
+        # Same /app convention as the api and notifier jobs, and as
+        # mcpsrv/tests/run_integration.sh (which mounts the service at
+        # /app inside its container). Note the mechanism differs slightly:
+        # api/notifier test files hardcode sys.path.insert(0, "/app"),
+        # whereas mcpsrv/tests/test_tools.py imports plainly
+        # (`from app import tools as tools_mod`) and relies on the working
+        # directory instead -- hence the `cd /app` in the run step below.
+        # Kept as a symlink anyway rather than forking a CI-only import
+        # path, so all three Python services stage identically.
+        run: sudo ln -s "$GITHUB_WORKSPACE/mcpsrv" /app
+
+      - name: Run mocked unit tests (no real Postgres/Redis/api/network)
+        # `cd /app` puts the service root on sys.path via `python -m`,
+        # which is what makes `from app import ...` resolve -- the same
+        # thing run_integration.sh achieves with its `cd /tmp/run`.
+        working-directory: /app
+        run: |
+          python3 -m pytest tests/test_tools.py -v
+          # NOT run here (both need a real running api + Postgres + Redis +
+          # MCP stack, run manually per mcpsrv/tests/run_integration.sh):
+          #   integration_test.py -- drives a real MCP client over
+          #                          streamable HTTP against a live pod
+          #   live_check.py       -- exercises all 11 tools against the
+          #                          deployed production server
+          #
+          # This job only wires the *unit* tests into CI. The plan's
+          # three-stage bar for any future MCP change -- unit ->
+          # disposable-container integration -> live production check --
+          # still requires running run_integration.sh and live_check.py by
+          # hand before the change is considered done. A green CI run is
+          # necessary but not sufficient, exactly as this file's header
+          # comment already states for the other jobs.
+
   web:
     runs-on: ubuntu-latest
     # There is no JS/Svelte unit test suite in this repo yet (no test

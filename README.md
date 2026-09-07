@@ -628,19 +628,24 @@ hardening already in place:
 - **Response headers** — `web/Caddyfile` sends HSTS,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `X-Frame-Options: DENY`,
   and a `frame-ancestors 'none'` CSP on every response.
-- **Non-root containers** — all four app images (`api`, `ingestor`,
-  `notifier`, `web`) run as an explicit non-root `USER`.
+- **Non-root containers** — all five app images (`api`, `ingestor`,
+  `notifier`, `web`, `mcpsrv`) run as an explicit non-root `USER`.
 
-**Accepted risk**: FastAPI's interactive docs (`/docs`, `/redoc`,
-`/openapi.json`) are intentionally left publicly enabled, including for
-`/api/admin/*` endpoint shapes — a deliberate tradeoff for a small
-self-hosted deployment, not an oversight. The hidden `/admin` panel itself
-still requires the process-log-only superuser password regardless of
-what `/docs` reveals about its endpoint shapes.
+**Correction (previously listed here as an accepted risk)**: this section
+used to state that FastAPI's interactive docs (`/docs`, `/redoc`,
+`/openapi.json`) were intentionally left publicly enabled. That was
+wrong — they are not reachable and never were. `web/Caddyfile` proxies
+only `/api/*`, while FastAPI serves its docs at root paths, so those URLs
+fall through to the SvelteKit SPA and return its `index.html` **with a
+`200`** (which is why the error went unnoticed; a status-code-only check
+reports them healthy). No endpoint shapes are disclosed and there is no
+live "Try it out" UI — but equally, **the API has no reachable
+machine-readable contract at all.** Publishing one is tracked as a
+deferred feature in `docs/plan.md` §12b.
 
 ## Development / Testing Methodology
 
-Every service (`ingestor`, `api`, `notifier`, `web`) has a
+Every service (`ingestor`, `api`, `notifier`, `web`, `mcpsrv`) has a
 `tests/run_integration.sh` (or, for `web`, a container-based build/serve
 smoke test) that spins up a disposable Podman pod with real Postgres/Redis,
 runs unit tests, and exercises the service end-to-end against real
@@ -654,14 +659,16 @@ See `docs/plan.md` §10 (Progress Log) for what each service's test suite
 covers.
 
 **CI (`.github/workflows/tests.yml`)** runs on every push/PR against
-`master` as a fast first line of defense — separate `api`/`notifier`/`web`
-jobs, each installing that service's real dependencies
-(`requirements.txt`/`package.json`) and running only the subset of tests
-that need no real Postgres/Redis/SMTP (the mocked `unittest`-style files;
-`web` runs a static `npm run build` since there's no JS unit suite yet).
+`master` as a fast first line of defense — separate
+`api`/`notifier`/`mcpsrv`/`web` jobs, each installing that service's real
+dependencies (`requirements.txt`/`package.json`) and running only the
+subset of tests that need no real Postgres/Redis/SMTP/network (the mocked
+`unittest`-style files; `mcpsrv` runs its 12 mocked tool tests; `web` runs
+a static `npm run build` since there's no JS unit suite yet).
 It intentionally does **not** run `integration_test.py`,
-`real_smtp_smoke_test.py`, or anything else needing live infrastructure —
-those stay part of the manual `run_integration.sh` methodology above and
+`real_smtp_smoke_test.py`, `mcpsrv/tests/live_check.py`, or anything else
+needing live infrastructure — those stay part of the manual
+`run_integration.sh` methodology above and
 are still required before considering any change done; CI complements that
 process, it doesn't replace it.
 
