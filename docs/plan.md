@@ -1320,9 +1320,184 @@ so they aren't lost or accidentally reinvented differently later:
   Would reuse the existing ingestor/differ/change-event pipeline; the
   main new work is per-service schema + parser definitions and frontend
   browse/detail templates.
-- **An MCP (Model Context Protocol) server** exposing this app's
-  search/browse/identity-grouping/watch data as tools for LLM agents —
-  a natural complement to the existing REST API, likely implemented as a
-  thin additional service translating MCP tool calls to the existing
-  `api` endpoints rather than duplicating data-access logic.
+- **An MCP (Model Context Protocol) server** — fully planned, not yet
+  built. See "§12a. MCP Server — Planned Design (Not Yet Built)" below
+  for the complete design (scope, stack, repo layout, deployment
+  wiring, and open items) so a future session can resume directly into
+  implementation without re-deriving these decisions.
+
+## 12a. MCP Server — Planned Design (Not Yet Built)
+
+Planned on request; deliberately not started yet (revisit when the
+user is ready to build). This section exists so a future session can
+resume directly into implementation with zero lost context — treat it
+as a design doc, not a progress log entry (nothing here is "done").
+
+### Confirmed decisions (from user)
+
+- **Scope: read-only.** Search, browse, detail/attribute lookup,
+  identity-grouping/crosslinks, and change-history tools only. No
+  watch-creation, no notification-channel management, no admin
+  actions exposed via MCP. This means **no new auth model is needed**
+  at all — every tool an MCP client can call maps to data that's
+  already public/anonymous in the existing REST API. This was the
+  single biggest scope-reducing decision: it eliminates the hardest
+  open question (how an LLM agent would authenticate as a specific
+  human user for magic-link-gated actions) entirely, for now.
+- **Transport: remote HTTP/SSE**, hosted alongside the rest of the app
+  (reachable through the existing Cloudflare Tunnel, so any
+  MCP-capable client/agent on the internet can point at it, not just
+  local processes on the user's own machine).
+- **Deployment: new containerized service** with its own Quadlet,
+  calling the existing `api` container over the internal Podman
+  network — not mounted inside the `api` FastAPI process itself. Keeps
+  the MCP protocol dependency, versioning, and crash blast-radius
+  isolated, matching this project's existing one-container-per-concern
+  pattern (`api`, `notifier`, `ingestor`, `web` are all already
+  separate).
+
+### Why "thin translation layer," not new data-access code
+
+The existing `api` service already has every read capability this
+server would need, fully built and tested:
+
+| Existing REST endpoint | MCP tool it maps to |
+|---|---|
+| `GET /api/search?q=...` (trigram search across callsigns, ASR registration numbers, and licensee/entity names — `api/app/routers/search.py`) | `search_uls(query, limit)` |
+| `GET /api/amateur?...` (paginated/filterable/sortable browse — `amateur.py`) | `browse_amateur(filters, sort, page)` |
+| `GET /api/amateur/{call_sign}` (full attribute + license history + related-identity panel) | `get_amateur_license(call_sign)` |
+| `GET /api/towers?...` | `browse_towers(filters, sort, page)` |
+| `GET /api/towers/{registration_number}` | `get_tower(registration_number)` |
+| `GET /api/identity/frn/{frn}` (all licenses/towers sharing an FRN — `identity.py`) | `get_identity_group_by_frn(frn)` |
+| `GET /api/identity/address` (entities sharing a mailing address) | `get_identity_group_by_address(...)` |
+| *(new endpoint needed — see below)* | `get_change_history(subject_type, subject_value)` |
+
+The MCP server itself should contain **zero direct database access**
+— it's purely an MCP-protocol-speaking adapter calling the existing
+`api` service's REST endpoints (over the internal Podman network,
+e.g. `http://fcculs-api:8000`) and reshaping JSON into MCP tool
+results. This avoids duplicating SQL/query logic in a second place and
+means the MCP server inherits the `api` service's existing rate
+limiting, input validation, and Postgres connection pooling for free.
+
+**One real gap to close first**: nothing today exposes `change_events`
+(the diff/history log) over REST at all — the web frontend renders it
+inline on detail pages via a query the `amateur`/`towers` routers
+already do, but there's no standalone `GET /api/.../history` endpoint
+an external client (or this MCP server) could call directly. A small,
+genuinely new `api` endpoint is needed for the `get_change_history`
+tool specifically — everything else is a pure passthrough.
+
+### Proposed stack
+
+| Concern | Choice | Rationale |
+|---|---|---|
+| Language/runtime | Python 3.12, matching every other service | Consistency; official `mcp` Python SDK (`modelcontextprotocol/python-sdk`) already supports streamable-HTTP/SSE transport server-side |
+| MCP SDK | Official `mcp` package's `FastMCP` server class | Handles JSON-RPC framing, tool schema generation, and the HTTP/SSE transport loop — no protocol code to hand-write |
+| HTTP client to `api` | `httpx.AsyncClient`, already used by `notifier`'s webhook sender | Already a proven dependency in this project |
+| Container base image | `python:3.12-slim`, matching `api`/`notifier`/`ingestor` | Consistency, already covered by the Dependabot docker config once this directory exists |
+
+### New repo layout
+
+- `mcp/` — new top-level service directory, sibling to `api`/
+  `notifier`/`ingestor`/`web`:
+  - `app/server.py` — `FastMCP` instance, tool registrations.
+  - `app/client.py` — thin `httpx`-based wrapper around the `api`
+    service's REST endpoints (base URL from a new
+    `FCCULS_API_BASE_URL` setting, defaulting to the internal Podman
+    DNS name).
+  - `app/config.py` — `pydantic-settings`, following the same
+    `FCCULS_`-prefixed-env-var convention already used elsewhere.
+  - `requirements.txt` — `mcp`, `httpx`, `pydantic-settings`.
+  - `Dockerfile` — non-root `USER`, matching every other service.
+  - `tests/` — mocked unit tests (mock `httpx` calls to a fake `api`,
+    assert correct MCP tool schemas/outputs) plus a
+    `run_integration.sh` spinning up the real `api` container and
+    calling each tool for real against live data, matching this
+    project's established "no mocks-only" testing methodology.
+
+### Deployment wiring
+
+- New `quadlet/fcculs-mcp.container` Quadlet template, modeled on
+  `fcculs-notifier.container` — but since this server needs to be
+  Cloudflare-Tunnel-reachable, it likely gets a new Caddy route
+  (`/mcp/*` proxied to `fcculs-mcp:<port>`) in `web/Caddyfile` rather
+  than a directly tunneled port, so it inherits the same TLS/security-
+  headers handling already applied to the rest of the app.
+- New settings threaded through `deploy/install-quadlets.sh`'s
+  existing substitution-list pattern (`FCCULS_API_BASE_URL` for the
+  MCP container, plus whatever port it listens on internally).
+- `.env.example` gets the new variables documented inline.
+- Since this tool is read-only and unauthenticated by design, the
+  same per-IP rate limiting pattern used for `/api/search`/
+  `/api/amateur`/`/api/towers` should be applied at the Caddy or
+  `api`-call level too — needs a decision at build time, since MCP
+  tool calls could hit `get_amateur_license`/`get_tower` detail
+  endpoints, which currently have **no** rate limit of their own,
+  unlike browse/search (see open items below).
+
+### Open items to resolve at build time (not yet decided)
+
+1. **MCP spec version / transport specifics** — confirm which
+   transport revision the current `mcp` Python SDK release
+   defaults to / supports, and pick a spec version to target
+   explicitly (documented in the MCP server's own README).
+2. **Detail-endpoint rate limiting gap** — `GET /api/amateur/{call_sign}`
+   and `GET /api/towers/{registration_number}` currently have no
+   per-IP rate limit (only browse/search do). An MCP agent making
+   rapid detail-lookup tool calls would hit this unthrottled path —
+   needs its own small rate-limit addition as a prerequisite, or the
+   MCP layer needs to apply its own limiting in front of them.
+3. **New `get_change_history` endpoint's shape** — needs a schema
+   decision (pagination? date-range filtering? subject_type validation
+   against the same allow-list `watches.py` already uses).
+4. **Public discoverability/robots** — an MCP endpoint reachable over
+   the same Cloudflare Tunnel as the rest of the app is, by
+   definition, internet-reachable by any MCP-aware client, not just
+   ones the user intends. Decide whether this needs any access
+   control at all (e.g. a shared bearer token in the MCP transport
+   headers) given "read-only + no auth" was the explicit choice here.
+5. **Tool result size limits** — LLM context windows mean tool outputs
+   (e.g. a `browse_amateur` call with a huge result set) need sensible
+   default/max page sizes distinct from the web frontend's own
+   defaults.
+
+### Todos (create in SQL `todos` table when this moves from planning to implementation)
+
+- `mcp-server-scaffold` — New `mcp/` service directory: `FastMCP`
+  server, config, Dockerfile (non-root), requirements.
+- `mcp-tool-search-browse` — Implement `search_uls`, `browse_amateur`,
+  `browse_towers`, `get_amateur_license`, `get_tower` tools as thin
+  `httpx` passthroughs to the existing `api` REST endpoints.
+- `mcp-tool-identity-grouping` — Implement `get_identity_group_by_frn`
+  and `get_identity_group_by_address` tools.
+- `api-change-history-endpoint` — New read-only `GET .../history`
+  endpoint(s) on the existing `api` service (genuinely new code, not a
+  passthrough) to back the new `get_change_history` MCP tool.
+- `mcp-tool-change-history` — Implement `get_change_history` tool
+  against the new endpoint above.
+- `mcp-quadlet-deploy` — `quadlet/fcculs-mcp.container`, `.env.example`
+  entries, `install-quadlets.sh` substitution wiring, `Caddyfile`
+  `/mcp/*` route.
+- `mcp-detail-endpoint-rate-limit` — Close the pre-existing rate-limit
+  gap on `GET /api/amateur/{call_sign}` and
+  `GET /api/towers/{registration_number}` before/alongside exposing
+  them through an unauthenticated MCP tool surface.
+- `mcp-tests` — Mocked unit tests + a real `run_integration.sh`
+  exercising every tool against a live `api` + Postgres.
+- `mcp-docs` — README section covering how to point an MCP client at
+  the server, plus a `docs/plan.md` progress-log entry once built.
+
+Dependencies: `mcp-server-scaffold` blocks everything else;
+`api-change-history-endpoint` blocks `mcp-tool-change-history` only;
+`mcp-detail-endpoint-rate-limit` should land before or alongside
+`mcp-quadlet-deploy` (i.e. before the server is actually
+internet-reachable); `mcp-tests` and `mcp-docs` come last.
+
+Testing (once built): this project's established methodology — mocked
+unit tests for each tool's request/response shaping, then a
+disposable-container integration run against the real `api` +
+Postgres, then live verification on production by pointing a real MCP
+client at the deployed `/mcp` endpoint and confirming each tool
+returns real data end-to-end, before considering any todo done.
 
