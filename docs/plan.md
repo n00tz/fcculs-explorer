@@ -1376,6 +1376,21 @@ commands for a given test run are chained into a single SSH invocation.
   `CodeHint`/`field-definitions` route included, confirming no Svelte
   binding/import errors before this lands on production.
 
+- ✅ `readme-sbom` — done. Added a "Software Bill of Materials" section
+  to README.md, directly under the existing high-level Stack table,
+  since that table only names architectural choices (e.g. "Python
+  3.12 + FastAPI") without listing the actual dependency manifest.
+  Lists every container base image (with which service(s) use it),
+  and every package from `api/requirements.txt`,
+  `ingestor/requirements.txt`, `notifier/requirements.txt`, and
+  `web/package.json` verbatim, plus a note that `web`'s dependencies
+  are build-time only (the runtime image is Caddy serving a static
+  build) and that no other runtime dependencies (CDN JS, analytics,
+  paid API SDKs) exist anywhere in the stack. Instructed readers to
+  keep it in sync when Dependabot bumps a manifest/base-image tag.
+  Documentation-only change; no code path exercised, so no test beyond
+  proofreading the dependency lists against the actual manifest files.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

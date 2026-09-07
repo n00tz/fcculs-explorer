@@ -30,6 +30,50 @@ rather than deploy or administer it? See `docs/user-guide.md`.**
 | Auth | Passwordless magic-link email, signed session cookies |
 | Deployment | Rootless Podman + `podman compose` / `docker compose` |
 
+## Software Bill of Materials
+
+The table above names the architectural choices; this is the actual
+dependency manifest, kept here (rather than only in each service's
+lockfile) so a reviewer or auditor doesn't have to open five different
+files to see everything the app pulls in. Update this section whenever a
+`requirements.txt`/`package.json`/base-image tag changes (Dependabot PRs
+bump these regularly — see Development / Testing Methodology below).
+
+**Container base images** (see each service's `Dockerfile`; version drift
+is tracked automatically by `.github/dependabot.yml`'s `docker` entries):
+
+| Image | Used by |
+|---|---|
+| `python:3.12-slim` | `api`, `ingestor`, `notifier` |
+| `node:22-slim` (build stage only) | `web` |
+| `caddy:2-alpine` (runtime stage) | `web` |
+| `postgres:16-alpine` | `postgres` service (`compose.yaml`) |
+| `redis:7-alpine` | `redis` service (`compose.yaml`) |
+
+**`api/requirements.txt`** — FastAPI backend:
+`fastapi==0.115.*`, `uvicorn[standard]==0.30.*`, `psycopg[binary]==3.2.*`,
+`psycopg-pool==3.2.*`, `pydantic-settings==2.*`, `email-validator==2.*`,
+`itsdangerous==2.*`, `aiosmtplib==3.*`, `httpx==0.27.*`, `redis==5.*`,
+`rq==1.*`, `pytest==8.*`, `pytest-asyncio==0.24.*`
+
+**`ingestor/requirements.txt`** — FCC file downloader/parser + scheduler:
+`httpx>=0.27`, `psycopg[binary]>=3.1`, `apscheduler>=3.10`, `pytest>=8.0`
+
+**`notifier/requirements.txt`** — RQ worker + delivery senders:
+`psycopg[binary]==3.2.*`, `rq==1.16.*`, `redis==5.*`, `httpx==0.27.*`,
+`pytest==8.*`
+
+**`web/package.json`** — SvelteKit frontend (build-time only; none of
+these ship in the runtime Caddy image, which serves only the static
+build output):
+`@sveltejs/kit ^2.5.18`, `@sveltejs/adapter-static ^3.0.2`,
+`@sveltejs/vite-plugin-svelte ^3.1.1`, `svelte ^4.2.18`, `vite ^5.3.3`
+
+No other runtime dependencies (no CDN-loaded JS, no client-side analytics/
+tracking libraries, no paid third-party API SDKs) are used anywhere in the
+stack, consistent with the project's "free and open source integrations
+only" design goal.
+
 ## Repository Layout
 
 ```
