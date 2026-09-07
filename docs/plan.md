@@ -2116,8 +2116,36 @@ current, and `src/mcp/server/fastmcp.py` is now a deliberate tombstone
 that raises `ModuleNotFoundError` pointing at a migration guide — the
 class is `MCPServer`. The current spec revision is `2026-07-28`, which
 is sessionless by construction (no `initialize`, no `Mcp-Session-Id`,
-so no sticky-session requirement). The SDK also depends on **`httpx2`**,
-a different distribution from the `httpx` the notifier pins.
+so no sticky-session requirement).
+
+Re-checking the proposed stack against the *project* rather than the
+SDK turned up a second, separate class of mismatch — the draft asserted
+"Python 3.12, matching every other service," but every Python service
+moved to `python:3.14-slim` in the Dependabot batch logged earlier, so
+3.12 matched nothing. (The SDK supports 3.14 explicitly and ships
+3.14-specific `anyio`/`starlette` pins, so no downgrade is needed.)
+Corrected alongside it: the base image now carries the
+`docker.io/library/` prefix the other Dockerfiles use, and the pin
+style follows the existing `==X.Y.*` wildcard-minor convention
+(`mcp==2.2.*`) instead of the freeze the draft recommended.
+
+The dependency note was wrong in the same direction. The SDK requires
+**`httpx2`**, which is Pydantic's continuation of `httpx` under a new
+distribution *and a new import name*, currently 2.12.0 — while upstream
+`httpx` sits at 0.28.1, which is what this project pins. The draft
+described that as "httpx (v1)", which undersells the problem: the MCP
+service would write `import httpx2` while every sibling service writes
+`import httpx`, so the notifier's webhook-sender patterns won't
+copy-paste. Separate containers mean there's no conflict to resolve,
+only a deliberate choice to record.
+
+Two smaller drift items came out of the same pass. The base image now
+carries the `docker.io/library/` prefix the real Dockerfiles use, and
+the claim that `config.py` would follow "the same convention as
+`api`/`notifier`" was collapsing two different things: the shared
+convention is the `FCCULS_` env-var *prefix*, but `api` uses
+`pydantic-settings` while `notifier` uses a plain dataclass over
+`os.environ`.
 
 One claim was worth chasing down to the source because a plain reading
 of it was **wrong in both directions**. `TransportSecurityMiddleware`'s
@@ -2317,40 +2345,67 @@ and the SDK source at tag `v2.2.0`:
   there is no `Mcp-Session-Id` and no sticky-session requirement. (The
   `stateless_http=` flag is a legacy-clients-only knob and does *not*
   govern the modern path.)
-- The SDK pulls in **`httpx2>=2.5.0`** — note the package name. This
-  project's `notifier` uses `httpx` (v1). They are different
-  distributions; do not assume the existing pinned `httpx` satisfies
-  it, and keep the MCP service's `requirements.txt` independent (it is
-  a separate container, so there is no actual conflict to resolve —
-  just don't copy the notifier's pin and expect it to work).
+- The SDK pulls in **`httpx2>=2.5.0`** — note the package name, and
+  don't skim past it. `httpx2` (currently 2.12.0) is Pydantic's
+  continuation of `httpx` under a **new distribution and new import
+  name**; upstream `httpx` remains at 0.28.1. This project pins
+  `httpx==0.28.*` in `api` and `notifier`, so the MCP service will end
+  up with `import httpx2` alongside a codebase that everywhere else
+  writes `import httpx`. Copy-pasting the notifier's webhook-sender
+  patterns will not work unmodified. Decide deliberately whether the
+  MCP client code uses the transitively-supplied `httpx2` or adds an
+  explicit `httpx==0.28.*` pin for consistency with its sibling
+  services — separate containers mean there's no dependency conflict to
+  resolve either way, only a readability choice.
 - Dependencies also include `pydantic>=2.12.0`, `jsonschema`,
-  `pyjwt[crypto]`, and a pinned `mcp-types==2.2.0`.
+  `pyjwt[crypto]`, `uvicorn>=0.31.1`, and a pinned `mcp-types==2.2.0`.
+- **Python 3.14 is explicitly supported** (it's in the trove
+  classifiers, and the SDK carries 3.14-specific pins —
+  `anyio>=4.10` and `starlette>=0.48.0` on 3.14 versus looser bounds
+  below it). This matters because the earlier draft of this section
+  said "Python 3.12, matching every other service", which was
+  **doubly wrong**: the project migrated to `python:3.14-slim` in the
+  Dependabot batch recorded above, and 3.12 wouldn't have matched
+  anything. No downgrade is needed to adopt the SDK.
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Language/runtime | Python 3.12, matching every other service | Consistency; SDK requires ≥3.10 |
+| Language/runtime | Python 3.14, matching `api`/`ingestor`/`notifier` | SDK requires ≥3.10 and ships 3.14-specific dependency pins |
 | MCP SDK | `mcp` 2.x, `MCPServer` class | Handles JSON-RPC framing, tool schema generation from type hints/docstrings, and the HTTP transport loop |
-| HTTP client to `api` | `httpx` (or `httpx2`, already pulled in transitively) | Proven pattern in this project |
-| Container base image | `python:3.12-slim`, non-root `USER` | Matches `api`/`notifier`/`ingestor` and the security-hardening pass |
+| HTTP client to `api` | `httpx2` (transitive) or an explicit `httpx==0.28.*` — pick one deliberately | Sibling services all use `httpx==0.28.*`; the SDK forces `httpx2` into the image regardless |
+| Container base image | `docker.io/library/python:3.14-slim`, non-root `USER` | Matches `api`/`notifier`/`ingestor` exactly, including the fully-qualified registry prefix rootless Podman wants |
 
-**Version-pin caution:** `mcp` 2.2.0 was published very recently, and
-2.x is a hard break from 1.x. Pin an exact version in
-`requirements.txt` rather than a floating range, and expect Dependabot
-to open 2.x bumps that need the migration guide checked before merging.
-Anyone who instead wants the old `FastMCP` API must pin `mcp<2`.
+**Version-pin style:** follow the existing convention rather than
+inventing a new one. `api` and `notifier` pin with wildcard minors
+(`fastapi==0.141.*`, `httpx==0.28.*`, `psycopg[binary]==3.3.*`), so
+this service should use **`mcp==2.2.*`** — not a bare `mcp` and not a
+fully-frozen `mcp==2.2.0`. (`ingestor` uses `>=` floors instead; the
+`==X.Y.*` style is the better match here given the caveat below.)
+
+**Version-pin caution:** `mcp` 2.2.0 was published on 2026-09-07 — the
+same day this section was written — and 2.x is a hard break from 1.x.
+Expect Dependabot to open bumps that need the migration guide read
+before merging, rather than the usual rubber-stamp. Anyone who instead
+wants the old `FastMCP` API must pin `mcp<2`.
 
 ### New repo layout
 
 - `mcp/` — new top-level service directory, sibling to `api`/
   `notifier`/`ingestor`/`web`:
   - `app/server.py` — `MCPServer` instance and tool registrations.
-  - `app/client.py` — thin `httpx` wrapper over the `api` REST
+  - `app/client.py` — thin async HTTP wrapper over the `api` REST
     endpoints (base URL from a new `FCCULS_API_BASE_URL` setting,
-    defaulting to the internal Podman DNS name).
+    defaulting to the internal Podman DNS name); see the
+    `httpx`-vs-`httpx2` note above before writing it.
   - `app/services.py` — the config table that generates the
     GMRS/Aircraft/Ship tool pairs, mirroring `personal_services.py`.
-  - `app/config.py` — `pydantic-settings`, following the same
-    `FCCULS_`-prefixed convention as `api`/`notifier`.
+  - `app/config.py` — the shared convention across services is the
+    `FCCULS_` env-var **prefix**, not a shared mechanism: `api` uses
+    `pydantic-settings` (`env_prefix="FCCULS_"`), while `notifier`
+    uses a plain `dataclass` reading `os.environ`. Either fits.
+    `pydantic-settings==2.*` (matching `api`'s pin) is the natural
+    pick here since the SDK already forces `pydantic>=2.12` into the
+    image, so it costs nothing extra.
   - `requirements.txt`, `Dockerfile` (non-root), `tests/`.
 
 > **Directory-name hazard:** a top-level `mcp/` directory shares its
@@ -2481,7 +2536,8 @@ Two distinct problems:
 
 - `mcp-server-scaffold` — New service directory (name chosen to avoid
   the `mcp` import collision): `MCPServer` instance, config, non-root
-  Dockerfile, exact-pinned requirements.
+  Dockerfile on `docker.io/library/python:3.14-slim`, and requirements
+  pinned `mcp==2.2.*` in the project's existing wildcard-minor style.
 - `mcp-tool-search-browse` — `search_uls` (documenting all 12 search
   arms including `n_number`/`ship_name`), plus browse+detail tools for
   **all five** services, with the GMRS/Aircraft/Ship six generated from
