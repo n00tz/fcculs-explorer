@@ -2,7 +2,7 @@
 # the built assets (plus reverse-proxy to the API) with Caddy -- no Node
 # runtime needed in the final image, and Caddy handles TLS automatically if
 # a public hostname is configured.
-FROM docker.io/library/node:22-slim AS build
+FROM docker.io/library/node:26-slim AS build
 
 WORKDIR /app
 COPY package.json .
