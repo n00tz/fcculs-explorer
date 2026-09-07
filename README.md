@@ -44,30 +44,30 @@ is tracked automatically by `.github/dependabot.yml`'s `docker` entries):
 
 | Image | Used by |
 |---|---|
-| `python:3.12-slim` | `api`, `ingestor`, `notifier` |
-| `node:22-slim` (build stage only) | `web` |
+| `python:3.14-slim` | `api`, `ingestor`, `notifier` |
+| `node:26-slim` (build stage only) | `web` |
 | `caddy:2-alpine` (runtime stage) | `web` |
 | `postgres:16-alpine` | `postgres` service (`compose.yaml`) |
 | `redis:7-alpine` | `redis` service (`compose.yaml`) |
 
 **`api/requirements.txt`** — FastAPI backend:
 `fastapi==0.115.*`, `uvicorn[standard]==0.30.*`, `psycopg[binary]==3.2.*`,
-`psycopg-pool==3.2.*`, `pydantic-settings==2.*`, `email-validator==2.*`,
-`itsdangerous==2.*`, `aiosmtplib==3.*`, `httpx==0.27.*`, `redis==5.*`,
-`rq==1.*`, `pytest==8.*`, `pytest-asyncio==0.24.*`
+`psycopg-pool==3.3.*`, `pydantic-settings==2.*`, `email-validator==2.*`,
+`itsdangerous==2.*`, `aiosmtplib==3.*`, `httpx==0.28.*`, `redis==8.*`,
+`rq==1.*`, `pytest==9.*`, `pytest-asyncio==1.4.*`
 
 **`ingestor/requirements.txt`** — FCC file downloader/parser + scheduler:
-`httpx>=0.27`, `psycopg[binary]>=3.1`, `apscheduler>=3.10`, `pytest>=8.0`
+`httpx>=0.28.1`, `psycopg[binary]>=3.3.5`, `apscheduler>=3.11.3`, `pytest>=9.1.1`
 
 **`notifier/requirements.txt`** — RQ worker + delivery senders:
-`psycopg[binary]==3.2.*`, `rq==1.16.*`, `redis==5.*`, `httpx==0.27.*`,
-`pytest==8.*`
+`psycopg[binary]==3.3.*`, `rq==2.12.*`, `redis==8.*`, `httpx==0.28.*`,
+`pytest==9.*`
 
 **`web/package.json`** — SvelteKit frontend (build-time only; none of
 these ship in the runtime Caddy image, which serves only the static
 build output):
 `@sveltejs/kit ^2.5.18`, `@sveltejs/adapter-static ^3.0.2`,
-`@sveltejs/vite-plugin-svelte ^3.1.1`, `svelte ^4.2.18`, `vite ^5.3.3`
+`@sveltejs/vite-plugin-svelte ^7.3.0`, `svelte ^5.57.0`, `vite ^8.2.2`
 
 No other runtime dependencies (no CDN-loaded JS, no client-side analytics/
 tracking libraries, no paid third-party API SDKs) are used anywhere in the
