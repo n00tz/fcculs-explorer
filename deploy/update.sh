@@ -19,9 +19,10 @@
 # later build.
 #
 # Idempotent: safe to re-run. If the repo is already at the latest commit
-# and images already carry that commit's revision label, it skips the
-# rebuild (use --force to rebuild anyway, e.g. after a local Dockerfile-only
-# edit that didn't change the app code).
+# and EVERY built image (api, ingestor, notifier, web) already carries that
+# commit's revision label, it skips the rebuild (use --force to rebuild
+# anyway, e.g. after a local Dockerfile-only edit that didn't change the
+# app code).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -104,12 +105,25 @@ SHORT_SHA="$(git rev-parse --short HEAD)"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 if [[ "$FORCE" -eq 0 && "$BEFORE_SHA" == "$AFTER_SHA" ]]; then
-  # Nothing new pulled -- but only skip the rebuild if the currently tagged
-  # `:latest` api image (used as a proxy for "did we already build this
-  # commit") already carries this exact commit's revision label.
-  existing_rev="$(podman image inspect --format '{{ index .Labels "org.opencontainers.image.revision" }}' "$API_IMAGE" 2>/dev/null || true)"
-  if [[ "$existing_rev" == "$AFTER_SHA" ]]; then
-    echo "Already up to date at $SHORT_SHA and images already built from it. Nothing to do (use --force to rebuild anyway)."
+  # Nothing new pulled -- but only skip the rebuild if EVERY one of the
+  # four built images' currently tagged `:latest` already carries this
+  # exact commit's revision label. Checking only one image (e.g. api) is
+  # not sufficient: the four images build sequentially below, so a build
+  # failure partway through (e.g. web fails after api/ingestor/notifier
+  # already succeeded) can leave api's label matching the current commit
+  # while web is genuinely stale/never-successfully-built -- inspecting
+  # api alone would then wrongly report "already up to date" forever,
+  # until --force is passed manually.
+  all_up_to_date=1
+  for image_ref in "$API_IMAGE" "$INGESTOR_IMAGE" "$NOTIFIER_IMAGE" "$WEB_IMAGE"; do
+    existing_rev="$(podman image inspect --format '{{ index .Labels "org.opencontainers.image.revision" }}' "$image_ref" 2>/dev/null || true)"
+    if [[ "$existing_rev" != "$AFTER_SHA" ]]; then
+      all_up_to_date=0
+      break
+    fi
+  done
+  if [[ "$all_up_to_date" -eq 1 ]]; then
+    echo "Already up to date at $SHORT_SHA and all images already built from it. Nothing to do (use --force to rebuild anyway)."
     exit 0
   fi
 fi

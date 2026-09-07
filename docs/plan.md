@@ -1599,6 +1599,45 @@ commands for a given test run are chained into a single SSH invocation.
   `fcculs-web` container's `org.opencontainers.image.revision` label
   matches the deployed commit.
 
+- ✅ **`update.sh` skip-check bugfix: inspected only `api`'s revision
+  label, not all four images** — done. `deploy/update.sh`'s
+  "already up to date, nothing to do" fast-path only inspected the
+  `org.opencontainers.image.revision` label on `$API_IMAGE` as a proxy
+  for "did we already build this commit," even though the script
+  builds `api`, `ingestor`, `notifier`, and `web` sequentially. Since a
+  later image's build can fail after an earlier one already succeeded
+  (this project hit exactly this during the Help-page work above — an
+  interactive `web` build attempt failed on the `COPY --from=docs`
+  step before the `docs=` build-context wiring was correct), a retry
+  with no new commits pulled could see `api`'s label already matching
+  the current commit and report "Already up to date... Nothing to
+  do," silently leaving a genuinely stale/never-successfully-built
+  `web` (or `ingestor`/`notifier`) image in place indefinitely — the
+  live-service equivalent of a silent no-op deploy.
+
+  Fix: the skip check now loops over all four image refs
+  (`API_IMAGE`, `INGESTOR_IMAGE`, `NOTIFIER_IMAGE`, `WEB_IMAGE`) and
+  only skips the rebuild if **every one** already carries the current
+  commit's revision label; if any single image's label doesn't match,
+  the full rebuild proceeds as normal. Updated the script's header
+  comment to describe the corrected behavior.
+
+  Tested for real on `fcculs@10.64.3.39` per this project's
+  methodology (on a disposable clone at `/tmp/update-sh-test`, using
+  a throwaway `.env` pointing `API_IMAGE`/`INGESTOR_IMAGE`/
+  `NOTIFIER_IMAGE`/`WEB_IMAGE` at `updatesh-test-*` image names so
+  real production images were never touched): built a baseline where
+  all four images carried the current commit's label and confirmed a
+  re-run correctly printed "Already up to date... Nothing to do";
+  then intentionally re-tagged just the `web` image's `:latest` with
+  a fake stale revision label (`deadbeef...`) while leaving
+  api/ingestor/notifier's labels matching the current commit, and
+  confirmed a re-run **did not** skip — it rebuilt all four images and
+  correctly re-labeled `web` with the current commit's real revision.
+  Cleaned up all disposable test images/clone afterward. Merged to
+  `master` and deployed via `deploy/update.sh --force` on production
+  afterward with no incident.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
