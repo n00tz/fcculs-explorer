@@ -1,5 +1,7 @@
 # FCC ULS Explorer & Alerting Service
 
+[![Tests](https://github.com/n00tz/fcculs-explorer/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/n00tz/fcculs-explorer/actions/workflows/tests.yml)
+
 Self-hostable service for browsing FCC ULS Amateur Radio Service and Antenna
 Structure Registration (Tower) data, with watch-based alerting (email,
 email-to-SMS, or generic webhook) on changes to a specific callsign or ULS
@@ -377,6 +379,18 @@ bash <service>/tests/run_integration.sh
 
 See `docs/plan.md` §10 (Progress Log) for what each service's test suite
 covers.
+
+**CI (`.github/workflows/tests.yml`)** runs on every push/PR against
+`master` as a fast first line of defense — separate `api`/`notifier`/`web`
+jobs, each installing that service's real dependencies
+(`requirements.txt`/`package.json`) and running only the subset of tests
+that need no real Postgres/Redis/SMTP (the mocked `unittest`-style files;
+`web` runs a static `npm run build` since there's no JS unit suite yet).
+It intentionally does **not** run `integration_test.py`,
+`real_smtp_smoke_test.py`, or anything else needing live infrastructure —
+those stay part of the manual `run_integration.sh` methodology above and
+are still required before considering any change done; CI complements that
+process, it doesn't replace it.
 
 ## License / Attribution
 

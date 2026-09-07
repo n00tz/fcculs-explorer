@@ -1203,6 +1203,85 @@ commands for a given test run are chained into a single SSH invocation.
   the timer's real future daily runs will populate that directory going
   forward.
 
+- ✅ `ci-fast-mocked-tests` — done. There was no `.github/workflows`
+  directory at all — every test run to date had been manual, over SSH,
+  against a real host. That's good for the integration suites (which
+  deliberately need real Postgres/Redis/SMTP and are never mocked), but
+  it meant a regression in the fast, fully-mocked unit tests (the
+  `unittest`-style files like `test_mailer.py`, `test_security.py`,
+  etc.) wouldn't be caught until the next manual pre-deploy check —
+  there was no automatic signal on every push/PR at all.
+
+  Added `.github/workflows/tests.yml`, running on `push`/`pull_request`
+  against `master`, with three independent jobs:
+  - **`api`**: installs `api/requirements.txt`, then runs
+    `pytest -v` (the same tool `api/tests/run_integration.sh` uses,
+    not `python -m unittest`) against `test_mailer.py`,
+    `test_auth_base_url.py`, `test_url_safety.py`, `test_security.py`,
+    and `test_admin_auth.py` — the five files in `api/tests` that need
+    no real Postgres/Redis/SMTP (verified by inspection: none import
+    `app.main`/`app.database`, none open a real DB/Redis connection,
+    all state is either pure logic or mocked at the boundary).
+    `test_admin_auth.py` wasn't explicitly named in the request but
+    was added too since it meets the stated criterion (no real infra
+    required) and is pure `unittest`-style logic like the others.
+    `test_ratelimit.py` is explicitly **excluded** — despite also being
+    "mocked unittest-style" in naming convention, it genuinely needs a
+    real Redis (`enforce_rate_limit` talks to Redis directly, by
+    design, per its own Progress Log entry above) and so stays manual.
+  - **`notifier`**: same pattern against `notifier/requirements.txt`
+    and its two no-real-infra files, `test_senders.py` and
+    `test_url_safety.py` (`notifier/tests/run_integration.sh` runs
+    these via `unittest discover`, but this workflow uses `pytest`
+    instead per the request — pytest runs plain `unittest.TestCase`
+    files natively, so the exact same test files work unmodified under
+    either runner).
+  - **`web`**: there is no JS/Svelte unit test suite in this repo at
+    all (no test files, no `"test"` script in `package.json`), so this
+    job runs `npm install && npm run build` instead — the fastest real,
+    no-backend-required check available today. Chosen deliberately: an
+    earlier round of this project shipped a silently-stale production
+    image because an invalid Svelte dynamic-`type=` binding broke
+    `vite build` without anyone noticing until a live test caught it
+    (see this file's `homepage-hero-svg`/guided-channel-config-ui
+    era entries) — a CI build check exactly like this one would have
+    caught that regression automatically instead of requiring a manual
+    live-verification pass to notice.
+
+  Non-obvious wrinkle: every file in `api/tests`/`notifier/tests`
+  hardcodes `sys.path.insert(0, "/app")`, matching the container mount
+  path each service's own `run_integration.sh` uses
+  (`-v /tmp/api_full:/app:Z` etc.) — rather than fork a CI-only import
+  path or edit every test file, each CI job does
+  `sudo ln -s "$GITHUB_WORKSPACE/<service>" /app` before running
+  pytest, so the exact same test files run completely unmodified in
+  both places.
+
+  Added a `Tests` status badge to the top of `README.md`, and a new
+  paragraph in the "Development / Testing Methodology" section
+  explicitly stating that this workflow is a fast first line of
+  defense that complements — and does not replace — the manual
+  real-infrastructure `run_integration.sh` testing already required
+  before any todo is considered done.
+
+  Tested for real (not just "should work"): rather than trust the YAML
+  in isolation, reproduced each job's exact commands in disposable
+  Podman containers on `fcculs@10.64.3.39` against a fresh copy of the
+  checked-out tree (mirroring what a GitHub Actions runner does): the
+  `api` job's 5 files (27 tests) all passed in a `python:3.12-slim`
+  container with `/app` bind-mounted to a fresh `api/` copy; the
+  `notifier` job's 2 files (26 tests) all passed the same way; the
+  `web` job's `npm install && npm run build` completed successfully
+  (~15s total, including install) in a `node:22-slim` container. All
+  dry-run artifacts were deleted from the production host afterward —
+  this workflow only runs on GitHub's own runners going forward, never
+  on the production host. Total per-job time in the dry run was well
+  under the 2-minute target; real GitHub-hosted runners will add
+  `actions/checkout`/`setup-python`/`setup-node` overhead but should
+  still comfortably finish inside that budget, especially once the
+  `cache: pip`/`cache: npm` dependency caches are warm after the first
+  run.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible

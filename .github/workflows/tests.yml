@@ -1,0 +1,116 @@
+name: Tests
+
+# Fast, no-real-infra unit tests only -- runs on every push/PR against
+# master as a first line of defense. This intentionally does NOT run
+# integration_test.py, real_smtp_smoke_test.py, or any other test that
+# needs a real Postgres/Redis/SMTP listener: those stay part of this
+# project's established manual pre-deploy methodology (disposable Podman
+# pods on the target host, see api/tests/run_integration.sh and
+# notifier/tests/run_integration.sh), and are not reproduced here. A green
+# run of this workflow is necessary but not sufficient before a feature is
+# considered "done" -- see docs/plan.md's Progress Log for the full
+# real-infra testing methodology every change still goes through.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: api/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r api/requirements.txt
+
+      - name: Symlink api/ to /app
+        # Every test file in api/tests hardcodes
+        # `sys.path.insert(0, "/app")` -- matching the container mount path
+        # used by api/tests/run_integration.sh's disposable Podman pod
+        # (`-v /tmp/api_full:/app:Z`). Symlinking here reuses those files
+        # completely unmodified rather than forking a CI-only import path.
+        run: sudo ln -s "$GITHUB_WORKSPACE/api" /app
+
+      - name: Run mocked unit tests (no real Postgres/Redis/SMTP)
+        env:
+          FCCULS_SESSION_SECRET: test-secret
+          FCCULS_MAGIC_LINK_BASE_URL: http://testserver
+        run: |
+          python3 -m pytest \
+            api/tests/test_mailer.py \
+            api/tests/test_auth_base_url.py \
+            api/tests/test_url_safety.py \
+            api/tests/test_security.py \
+            api/tests/test_admin_auth.py \
+            -v
+          # NOT run here (require real infra, run manually per
+          # api/tests/run_integration.sh):
+          #   test_ratelimit.py    -- needs a real Redis (enforce_rate_limit)
+          #   integration_test.py  -- needs a real Postgres + full app
+          #   real_smtp_smoke_test.py -- needs a real SMTP listener
+
+  notifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: notifier/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r notifier/requirements.txt
+
+      - name: Symlink notifier/ to /app
+        # Same rationale as the api job: notifier/tests files hardcode
+        # sys.path.insert(0, "/app") to match
+        # notifier/tests/run_integration.sh's Podman mount.
+        run: sudo ln -s "$GITHUB_WORKSPACE/notifier" /app
+
+      - name: Run mocked unit tests (no real Postgres/Redis)
+        run: |
+          python3 -m pytest \
+            notifier/tests/test_senders.py \
+            notifier/tests/test_url_safety.py \
+            -v
+          # NOT run here (requires real Postgres + Redis, run manually per
+          # notifier/tests/run_integration.sh):
+          #   integration_test.py
+
+  web:
+    runs-on: ubuntu-latest
+    # There is no JS/Svelte unit test suite in this repo yet (no test
+    # files, no "test" script in package.json) -- `npm run build` is the
+    # fastest real, no-infra-required check available today: it's a
+    # static `vite build` with SvelteKit's static adapter, needs no
+    # backend/API/Postgres/Redis, and would have caught the invalid
+    # Svelte dynamic-`type=` binding that silently produced a stale
+    # production image in an earlier round of this project (see
+    # docs/plan.md's Progress Log). Revisit this job once real web unit
+    # tests exist.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm install --no-audit --no-fund
+
+      - name: Build (static Vite/SvelteKit build, no backend required)
+        working-directory: web
+        run: npm run build
