@@ -2401,6 +2401,156 @@ are in the emitted stylesheet.
 Redeploy required — this is a web change, and `docs/user-guide.md` is
 baked into the web image at build time.
 
+### 2026-09-08 — Continuous ingest: polling FCC every 15 minutes
+
+The ingestor's once-daily `CronTrigger(hour=13, minute=30)` is retired in
+favour of an `IntervalTrigger` poll. See §3a of `docs/architecture.md`
+for the resulting design.
+
+**This is a latency fix, not a correctness fix**, and it is worth being
+precise about that. The catch-up logic already self-heals inside FCC's
+rolling 7-day window, so no data was ever being lost. What was bad was
+the tail: a file published at 12:00 UTC waited 1.5 h, but a file
+published at 14:00 UTC — *after* the run — waited until 13:30 the next
+day, roughly **23.5 h**. Polling collapses that worst case to ~15 min and
+turns FCC's irregular publication into a non-event. Nothing here should
+be described as fixing data loss.
+
+**The server was probed rather than assumed, and three of the four
+findings contradicted the obvious implementation.**
+
+1. **`If-Modified-Since` is honoured; `If-None-Match` is not.** Echoing
+   FCC's own ETag back returns `200` with a full body. The intuitive
+   ETag-based conditional request would have transferred the entire
+   listing every poll while looking perfectly correct in logs and tests.
+2. **Listing timestamps are US Eastern, not UTC.** `l_amat.zip` reads
+   `2026-09-06 09:08:06` in the listing against `13:08:06 GMT` by HEAD.
+   This is converted with `ZoneInfo("America/New_York")` and **not** a
+   fixed −4, because every timestamp on the server today is summer time:
+   a constant offset passes every test writable now and then misdates
+   every file after 1 November. That is pinned by an explicit DST test
+   rather than left to be discovered in production.
+3. **The listing is a static `index.html`, not live autoindex output.**
+   It was observed describing files published at 08:00–08:06 EDT while
+   its own mtime was 10:15:09 EDT — lagging by over two hours. So
+   index-only polling *cannot* guarantee detection within one interval,
+   which is the entire objective. This single finding is why the design
+   is a hybrid (cheap listing GET as trigger + targeted HEADs for dates
+   actually outstanding) instead of the simpler, cheaper index-only
+   version that was the starting assumption.
+4. **Live observation added afterwards:** the listing is regenerated
+   **hourly at ~:15** (`14:15:09` then `15:15:18` UTC). So one poll an
+   hour legitimately sees a `200` and the other three see `304`s. Worth
+   recording because a `200` at :15 looks like a broken conditional
+   request if you don't know this.
+
+**Cost is the reason for the whole design.** A naive 15-minute sweep of
+the existing per-file HEADs would mean 35 requests × 96 polls:
+
+| Mode | Per poll | Per day |
+|---|---|---|
+| Old daily cron | 35 | 35 |
+| Naive 15-min per-file sweep | 35 | ~3,360 |
+| This design, caught up | 1 (a `304`) | ~96 |
+| This design, waiting on a publication | 1 + ≤5 | ~340 |
+
+Going from 35 to ~3,360 requests/day against a government server was not
+acceptable, and rate-limiting ourselves out of the data would have been a
+self-inflicted outage. The listing is 18,124 B raw / **3,465 B gzipped**,
+and its parse was checked against real HEADs for all 35 daily files:
+**0 mismatches** on both timestamp and size.
+
+**The advisory lock exists to protect users, not the database.**
+`change_events` has no unique constraint, and `differ.diff_rows()`
+compares each row against the *currently stored* row — so two overlapping
+ingests of the same day each emit a full set of events, and the notifier
+faithfully turns those into **duplicate emails, texts and webhooks**.
+That was nearly impossible at one run per day and entirely plausible at
+96. `pg_try_advisory_lock` is used deliberately over the blocking form: a
+poll that finds an ingest already running should step aside, not queue
+behind it and then redo the work. It is session-scoped, so a crashed
+ingestor releases it automatically.
+
+**FCC's own `counts` member turned out to be a genuine integrity
+oracle.** Every archive carries one, and its per-file row counts matched
+production exactly — amateur 2026-09-01 at **5,691** and ship 2026-09-02
+at **219**, across different services and different record-type sets.
+Three gotchas are baked into the parser and its tests: the file uses CRLF
+and a space-padded day; its timezone is an *abbreviation* that `%Z`
+cannot portably parse, so it is captured, discarded, and re-interpreted
+in Eastern; and the `total` line must **never** be compared against,
+because it counts record types this project deliberately skips (`CO`,
+`SC`, `LA`, `SF`) and would produce a permanent false mismatch. A
+mismatch logs a `WARNING` and records `status='partial'` — never a
+refusal to ingest, because the known FCC quirks this is meant to surface
+(embedded newlines in `SV`, unescaped `|`) would otherwise block
+perfectly valid data.
+
+`counts` also closed a real hole: `File Creation Date` equals
+`Last-Modified` exactly, so a file whose header is missing can now be
+dated and ingested. Previously such files were skipped **forever**, which
+is precisely the wrong failure mode under an "FCC is unreliable" premise.
+
+**Empty archives are normal, not failures.** `l_am_sun.zip` and
+`l_am_mon.zip` were both **212 bytes** — valid zips containing only
+`counts` and no `.dat` at all (Labor Day and a Sunday). Roughly 2–3 of
+every 7 days look like this. They are recorded as zero-row successes;
+treating "no `.dat`" as an error would have retried them every 15 minutes
+forever.
+
+**A pre-existing harness bug surfaced en route.**
+`ingestor/tests/run_integration.sh` never applied `db/008`, so the real
+Postgres it tested against was missing `change_events.service` — a column
+`ingest.py` has been writing since the personal-radio-services work.
+Every integration run had been passing while testing a schema production
+does not have. Not caused by this change; fixed here (008, 009 and 010
+are now applied) and called out because it means earlier integration
+green was worth less than it appeared.
+
+**Testing.** The ingestor suite went **57 → 89 tests**. One existing test
+failed legitimately: it encoded the old "skip undateable files forever"
+contract, and was rewritten to assert the new deferral behaviour rather
+than patched to keep passing. Integration adds a check that opens **two
+real Postgres sessions** and proves the advisory lock admits exactly one
+ingest — the regression test that actually protects users from duplicate
+alerts.
+
+Deferred and recorded in §12: `REFRESH MATERIALIZED VIEW ...
+CONCURRENTLY` cannot be adopted, because it requires a unique index and
+`identity_by_frn` is a `UNION ALL` carrying **10,165 duplicate rows** on
+`(frn, source, subject_key)` out of 2,311,553. This matters more now than
+before: refreshes rise from ~1/day to ~2–3/day, since tower (~05:00 UTC)
+and amateur/GMRS (~12:00 UTC) no longer coalesce into a single run.
+
+Commit `6174d98`. Only the `ingestor` image needed rebuilding.
+
+**Live verification on production**, because a green test suite has never
+been sufficient in this project and the whole point of the change is a
+behaviour that only exists against the real server:
+
+- **Steady state is one request and zero bytes.** Two consecutive ticks
+  (15:45, 16:01) logged exactly `GET .../daily/ "HTTP/1.1 304 Not
+  Modified"` and nothing else — no ingest job, no HEADs, returning at the
+  fast path as designed.
+- **The full sweep at 60 min** (16:16) dropped the conditional header,
+  got a `200`, and evaluated **all five services across all 35 daily
+  files from that single response** — zero HEAD requests. That is the
+  35→1 cost reduction demonstrated live rather than argued from the code.
+- **The hourly heartbeat** reported `5 poll(s) in the last hour, 0
+  resulted in ingestion, 0 consecutive failure(s)`, confirming idle polls
+  really are silent at INFO while remaining observable.
+- **Jitter is working** — ticks landed at :29:44, :45:41, :01:38, :16:49
+  rather than on the quarter-hour.
+- **A manual `--catch-up` against the live database was a clean no-op**:
+  `change_events` was 15,570 before and 15,570 after, delta **0**.
+- `--status` reports all five services × 7 days `[ingested]`.
+
+One thing that initially looked like a bug and was not: the first
+interval tick returned `200` rather than `304`. Probing the server showed
+the listing had genuinely been regenerated at `15:15:18 GMT`, *after* the
+startup poll cached its value — which is finding 4 above, and the reason
+that finding is recorded at all.
+
 ## 12. Future Features (Deferred)
 
 Explicitly out of scope for now, per the user, but worth keeping visible
