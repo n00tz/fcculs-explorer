@@ -51,7 +51,7 @@ flowchart TB
             web["<b>web</b><br/>Caddy + SvelteKit static build<br/>:8080 (published)"]
             api["<b>api</b><br/>FastAPI + uvicorn<br/>:8000"]
             mcp["<b>mcp</b><br/>MCP server (streamable HTTP)<br/>:8080"]
-            ingestor["<b>ingestor</b><br/>APScheduler daily job"]
+            ingestor["<b>ingestor</b><br/>APScheduler FCC poller"]
             dispatch["<b>notifier-dispatch</b><br/>match loop"]
             worker["<b>notifier-worker</b><br/>RQ consumer"]
             pg[("<b>postgres</b><br/>:5432")]
@@ -167,15 +167,88 @@ project; see `docs/plan.md`'s Progress Log.
 The scheduler instead treats filenames as opaque and derives the true
 date from each file's `Last-Modified` header.
 
+### 3a. The poll cycle
+
+The scheduler does not run at a fixed time of day. FCC's publication
+schedule is irregular, so a single daily run meant a file published even
+slightly after that run time waited roughly a full day. Instead the
+ingestor **polls every `INGEST_POLL_MINUTES`** (default 15).
+
+Polling naively would mean 5 services × 7 weekday files = **35 HEAD
+requests per poll, ~3,360/day** against a government server. It does not:
+FCC publishes a browsable directory listing that carries filename,
+timestamp and exact size for every file at once, and it honours
+`If-Modified-Since` on that listing. So a steady-state poll is **one
+conditional GET returning `304 Not Modified` with an empty body**.
+
+| Mode | Requests/poll | Requests/day |
+|---|---|---|
+| Old daily cron | 35 | 35 |
+| Naive 15-minute per-file sweep | 35 | ~3,360 |
+| Poll, caught up | 1 (a 304) | ~96 |
+| Poll, waiting on a publication | 1 + ≤5 | ~340 |
+
+Two properties of that listing are load-bearing and non-obvious, and both
+were confirmed against the live server rather than assumed:
+
+- **`If-None-Match` is not honoured.** Sending FCC's own ETag back returns
+  `200` and the full body. Only `If-Modified-Since` produces a `304`. The
+  "obvious" ETag implementation would silently transfer everything on
+  every poll while appearing to work.
+- **The listing is a static `index.html`, not live autoindex output**, and
+  it can lag the files it describes by hours. Index-only polling therefore
+  *cannot* guarantee detection within one interval — which is the whole
+  objective. Hence the hybrid: the listing is the cheap primary signal,
+  and the poller still issues targeted `HEAD`s for the handful of dates it
+  knows are still outstanding.
+
+Correctness never rests on the 304. What gets ingested is decided by the
+`ingest_runs` table; the listing only decides how cheaply that decision
+can be reached. If FCC's caching behaviour changes, polling gets more
+expensive, not wrong.
+
 ```mermaid
 flowchart TD
-    start(["Daily cron fires<br/>(default 13:30 UTC)"]) --> svc{"For each service:<br/>amateur, tower, gmrs,<br/>aircraft, ship<br/>(or just those named<br/>by --service)"}
+    tick(["Poll tick<br/>(default every 15 min)"]) --> listing["GET the daily/ directory listing<br/>with If-Modified-Since<br/>(1 request, usually 304)"]
+    listing --> outstanding["Query ingest_runs:<br/>which dates in the last 7 days<br/>have no success row?<br/>(pure DB, no network)"]
+    outstanding --> gate{"Nothing outstanding<br/>AND listing unchanged?"}
+    gate -->|"yes"| idle["Log at DEBUG and stop.<br/><b>Steady state: 1 request, 0 bytes</b>"]
+    gate -->|"no"| targeted["HEAD only the files backing<br/>still-missing dates (typically ≤5)<br/>— defeats index lag"]
+    targeted --> job["Run the ingest job below,<br/>under a Postgres advisory lock"]
+    job --> outcome{"Succeeded?"}
+    outcome -->|"yes"| reset["Reset failure counter"]
+    outcome -->|"no"| backoff["Skip the next min(2^failures, 16)<br/>polls — an FCC outage must not<br/>become 96 failed sweeps a day"]
+```
 
-    svc --> head["HEAD all 7 weekday files"]
+Every `INGEST_FULL_SWEEP_MINUTES` (default 60) the 304 fast path is
+ignored and all files are re-checked directly, covering FCC re-publishing
+an older weekday file without the listing reflecting it.
+
+The ingest phase is wrapped in `pg_try_advisory_lock`. `change_events` has
+no unique constraint and the differ compares against the *currently
+stored* row, so two overlapping ingests of the same day would each emit a
+full set of change events — and those feed the notifier, so the
+user-visible symptom would be **duplicate alerts**. Under a once-a-day
+cron that was nearly impossible; at 15-minute polling a slow run
+overlapping the next tick, or a poll racing an operator's manual
+`--catch-up`, is plausible. `try_` rather than blocking is deliberate: a
+poll that finds an ingest already running should step aside, not queue
+behind it and then redo the work.
+
+### 3b. The ingest job
+
+```mermaid
+flowchart TD
+    start(["Ingest job starts<br/>(from a poll tick, or --catch-up)"]) --> svc{"For each service:<br/>amateur, tower, gmrs,<br/>aircraft, ship<br/>(or just those named<br/>by --service)"}
+
+    svc --> head["Read all 7 weekday files' timestamp<br/>+ size from the cached listing;<br/>HEAD only what the listing can't settle"]
     head --> resolve["Resolve each file's real data date:<br/>walk back from Last-Modified to the<br/>first matching weekday"]
 
     resolve --> undated{"Date<br/>resolvable?"}
-    undated -->|"no — missing or<br/>unparseable header"| skipfile["Log warning, skip file<br/>(never guess)"]
+    undated -->|"no — missing or<br/>unparseable header"| fallback["Fall back to the archive's own<br/><b>counts</b> member: File Creation Date<br/>equals Last-Modified exactly"]
+    fallback --> stillno{"Still<br/>undateable?"}
+    stillno -->|"yes"| skipfile["Log warning, defer file<br/>(never guess; retried next poll)"]
+    stillno -->|"no"| known
     undated -->|"yes"| known
 
     known["Query ingest_runs for<br/>dates already loaded"] --> pending["pending = available<br/>− already ingested<br/>− outside 7-day window"]
@@ -186,7 +259,8 @@ flowchart TD
 
     loop --> dlday["Download + extract<br/>into its own temp dir"]
     dlday --> ingestday["ingest_file per .dat member<br/><b>effective_date = real data date</b>,<br/>not the run date"]
-    ingestday --> record["INSERT ingest_runs<br/>(service, data_date, sha256, counts)"]
+    ingestday --> verify["Compare rows ingested per file against<br/>FCC's own <b>counts</b> member<br/>(mismatch → WARNING + status='partial',<br/>never a refusal to ingest)"]
+    verify --> record["INSERT ingest_runs<br/>(service, data_date, sha256, counts, status)"]
     record --> more{"More<br/>pending?"}
     more -->|"yes"| loop
     more -->|"no"| done
@@ -800,7 +874,7 @@ flowchart TD
     d --> e["Start fcculs-bootstrap.service<br/>full weekly dumps, no change_events"]
     e --> f["scheduler.py --catch-up<br/><b>required, not optional</b>"]
     f --> g["scheduler.py --status<br/>confirm no [MISSING] days"]
-    g --> h(["Daily cron takes over"])
+    g --> h(["15-minute poll takes over"])
 ```
 
 > The weekly dump is cut once a week, so on any day but publication day it

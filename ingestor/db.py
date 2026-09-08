@@ -3,6 +3,7 @@
 Uses psycopg (v3) with plain SQL -- no ORM, since every table/row shape here
 is a straight passthrough of parsed FCC records (see schemas.py).
 """
+from contextlib import contextmanager
 from datetime import date
 from typing import Iterable, Optional
 
@@ -196,3 +197,101 @@ def record_ingest_run(
              content_sha256, rows_ingested, changes_recorded, status),
         )
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Ingest concurrency control
+# ---------------------------------------------------------------------------
+
+# An arbitrary but FIXED application-wide key. Every ingest entrypoint (the
+# poll loop, --catch-up, --run-once, --bootstrap) takes this same lock, so
+# they can never interleave regardless of which one started first.
+INGEST_ADVISORY_LOCK_KEY = 8_140_573_921_004_311
+
+
+@contextmanager
+def ingest_advisory_lock(conn: psycopg.Connection):
+    """Hold Postgres' session-level advisory lock for the duration of an
+    ingest, yielding True if it was acquired and False if another ingest
+    already holds it.
+
+    Why this exists: `change_events` has no unique constraint, and
+    differ.diff_rows() compares each row against the CURRENTLY STORED row.
+    Two ingests of the same day that interleave (both reading the old row
+    before either upserts) therefore each emit a full set of change events,
+    and those feed the notifier -- so the user-visible symptom is DUPLICATE
+    ALERTS. With one run a day that was effectively impossible; polling
+    every 15 minutes makes a slow run overlapping the next tick, or a poll
+    racing an operator's manual --catch-up, entirely plausible.
+
+    Deliberately `pg_try_advisory_lock` (non-blocking) rather than
+    `pg_advisory_lock`: a poll that finds an ingest already running should
+    step aside, not queue up behind it and then immediately redo work that
+    the run it waited for has just finished.
+
+    The lock is session-scoped, so a crashed/disconnected ingest releases it
+    automatically when its connection dies -- there is no stale-lock state
+    to clean up by hand.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (INGEST_ADVISORY_LOCK_KEY,))
+        acquired = bool(cur.fetchone()[0])
+    # An advisory lock is not transactional, but the SELECT above still
+    # opened a transaction on this connection; commit so the lock isn't
+    # held inside a long-lived idle transaction.
+    conn.commit()
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (INGEST_ADVISORY_LOCK_KEY,))
+            conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Weekly "complete" dump observation
+# ---------------------------------------------------------------------------
+
+def record_complete_dump(conn: psycopg.Connection, service: str, filename: str,
+                         published_at, size_bytes: Optional[int]) -> bool:
+    """Record the latest observed weekly complete dump for a service.
+
+    Returns True if this is a NEWER dump than the one previously recorded,
+    so the caller can log the appearance of a fresh weekly snapshot exactly
+    once instead of on every poll.
+
+    Observation only: a complete dump is ~200 MB and re-loading it is a
+    disruptive, operator-level decision, so this never triggers a bootstrap.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT published_at FROM complete_dumps WHERE service = %s", (service,))
+        row = cur.fetchone()
+        previous = row[0] if row else None
+        is_new = previous is None or (published_at is not None and published_at > previous)
+        cur.execute(
+            """
+            INSERT INTO complete_dumps (service, filename, published_at, size_bytes)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (service) DO UPDATE SET
+                filename = EXCLUDED.filename,
+                published_at = EXCLUDED.published_at,
+                size_bytes = EXCLUDED.size_bytes,
+                observed_at = now()
+            """,
+            (service, filename, published_at, size_bytes),
+        )
+    conn.commit()
+    return is_new
+
+
+def latest_complete_dumps(conn: psycopg.Connection) -> dict:
+    """All recorded complete-dump observations, keyed by service (for --status)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT service, filename, published_at, size_bytes, observed_at FROM complete_dumps"
+        )
+        return {
+            r[0]: {"filename": r[1], "published_at": r[2], "size_bytes": r[3], "observed_at": r[4]}
+            for r in cur.fetchall()
+        }

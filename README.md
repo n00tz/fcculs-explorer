@@ -115,7 +115,8 @@ only" design goal.
 api/        FastAPI backend: search, browse, detail, identity-grouping,
             auth, notification-channel and watch CRUD. api/Dockerfile
 ingestor/   FCC file downloader, pipe-delimited parser, diff-before-upsert,
-            change_events generation, APScheduler daily-cron entrypoint
+            change_events generation, FCC directory-index scraper
+            (index_scraper.py), APScheduler polling entrypoint
             (scheduler.py). ingestor/Dockerfile
 notifier/   RQ worker (app/worker.py) + dispatcher (app/dispatch.py) that
             match new change_events to active watches and deliver via SMTP,
@@ -197,7 +198,7 @@ podman compose up -d --build
 This starts, on the Compose default network: `postgres`, `redis`, a
 one-shot `migrate` job (applies every file in `db/*.sql` in order; all
 migrations are idempotent so it's safe to re-run on every `up`), `api`,
-`ingestor` (runs on a daily cron by default), `notifier-worker` +
+`ingestor` (polls FCC every 15 minutes by default), `notifier-worker` +
 `notifier-dispatch` (one image, two roles), and `web` (the only service
 that publishes a host port, default `8080`, see `PUBLISHED_PORT` in
 `.env`).
@@ -221,9 +222,17 @@ The `--catch-up` run closes that gap; skipping it leaves a brand-new
 instance silently missing up to a week of grants (and an empty "New
 Hams" feed).
 
-After that, the regular `ingestor` service's daily cron
-(`INGEST_CRON_HOUR`/`INGEST_CRON_MINUTE` in `.env`, default 13:30 UTC)
-keeps data current via the daily transaction files.
+After that, the regular `ingestor` service keeps data current from the
+daily transaction files. It **polls** FCC (every `INGEST_POLL_MINUTES`,
+default 15) rather than running at one fixed time, because FCC's
+publication schedule is irregular enough that a fixed daily run left a
+late-published file waiting until the following day. A steady-state poll
+is a single conditional request that returns `304 Not Modified`; work
+only happens when a day is genuinely outstanding.
+
+There is no window to "miss": what gets ingested is decided by the
+`ingest_runs` table, not by the clock, so an ingestor that was stopped
+for a few days catches up on its own within FCC's rolling 7-day window.
 
 #### Loading only some services
 
@@ -579,7 +588,8 @@ when diagnosing — the server logs every upstream API call it makes.
 | `CORS_ALLOW_ORIGINS` | api | Comma-separated list of origins allowed to make credentialed (cookie-carrying) cross-origin requests to the API. **Must be the real public hostname(s) users reach the app at** (e.g. your Cloudflare Tunnel domain) — never a wildcard, since browsers respond to a wildcard + credentials combination by letting *any* site ride a signed-in user's or admin's session cookie. Change any time by editing `.env` and restarting the `api` service (`podman compose restart api`, or `systemctl --user restart fcculs-api` under Quadlets) — no image rebuild required. Multiple origins: `CORS_ALLOW_ORIGINS=https://a.example,https://b.example` |
 | `RATE_LIMIT_SEARCH_MAX`, `RATE_LIMIT_SEARCH_WINDOW_SECONDS` | api | Per-client-IP rate limit (default 60 requests/60 seconds) applied to the unauthenticated `/api/search`, `/api/amateur` browse, and `/api/towers` browse endpoints — the app's easiest DoS/cost-abuse surface once exposed to the internet, since they run trigram/filter queries against multi-million-row tables. Change any time by editing `.env` and restarting the `api` service — no rebuild required |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_FROM_ADDRESS` | api, notifier | Outbound SMTP relay for magic-links and email/email-to-SMS alerts |
-| `INGEST_CRON_HOUR`, `INGEST_CRON_MINUTE` | ingestor | UTC time of the daily ingest job (default 13:30, chosen to sit after FCC's ~05:00–13:00 UTC daily-file publication window) |
+| `INGEST_POLL_MINUTES` | ingestor | How often to check FCC for newly published daily files (default 15). Replaced the old fixed daily run time: FCC's publication window is irregular (tower ~05:00 UTC, amateur/GMRS ~12:00 UTC, and observed as late as 13:00), so a single daily run meant a late file waited until the *next* day. A poll normally costs **one** conditional HTTP request that returns `304 Not Modified` with no body |
+| `INGEST_FULL_SWEEP_MINUTES` | ingestor | How often to bypass the "nothing changed" fast path and re-check every file directly (default 60). Covers FCC re-publishing an older weekday file without its statically-generated directory listing reflecting it yet |
 | `MAX_DELIVERY_ATTEMPTS` | notifier | Retry cap per notification delivery |
 | `DISPATCH_INTERVAL_SECONDS` | notifier-dispatch | Polling interval for matching new `change_events` to watches |
 | `MCP_DEFAULT_PAGE_SIZE`, `MCP_MAX_PAGE_SIZE` | mcp | Default/maximum results per MCP tool call (default 10/50). Lower than the REST API's own page sizes because tool results are consumed by LLMs with finite context windows |

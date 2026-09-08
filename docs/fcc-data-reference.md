@@ -50,6 +50,79 @@ Apache/mod_autoindex indexes:
 No rate-limiting/auth observed; ingestor should still use reasonable
 delay/retry/backoff as a good citizen and for resilience.
 
+### The `daily/` directory listing (verified live 2026-09-08)
+
+`GET https://data.fcc.gov/download/pub/uls/daily/` returns a browsable
+listing of all 258 zips, each row carrying **filename, timestamp and exact
+byte size** — everything a `HEAD` on that file would tell you. 18,124
+bytes raw, **3,465 bytes gzipped**. Parsing it was verified against real
+`HEAD` requests for all 35 files this project uses: **0 mismatches** on
+either timestamp or size.
+
+This is what makes frequent polling affordable: one request replaces 35.
+
+Three properties are non-obvious and were each confirmed by probing the
+live server, not assumed:
+
+1. **`If-Modified-Since` works; `If-None-Match` does not.** Echoing FCC's
+   own ETag back returns `200` with the full 18,124-byte body. Only
+   `If-Modified-Since` yields `304` with an empty body. An ETag-based
+   implementation would look correct while transferring everything every
+   time.
+
+2. **Timestamps are US Eastern, not UTC.** `l_amat.zip` shows
+   `2026-09-06 09:08:06` in the listing but `Sun, 06 Sep 2026 13:08:06
+   GMT` via `HEAD` — UTC−4 (EDT). Convert with
+   `zoneinfo("America/New_York")`, **never a hardcoded −4**: every
+   timestamp visible on the server today is summer-time, so a fixed offset
+   passes every test that can be written now and then silently misdates
+   every file after the November DST transition — potentially resolving
+   files to the wrong `data_date`.
+
+3. **It is a static `index.html`, not live autoindex output, and it can
+   lag.** Observed with mtime `2026-09-08 10:15:09 EDT` while describing
+   files published `08:00–08:06 EDT` — a **~2 hour** lag. So the listing
+   alone cannot guarantee timely detection; the ingestor also issues
+   targeted `HEAD`s for dates it knows are outstanding.
+
+### The `counts` member
+
+Every daily archive contains a `counts` file giving FCC's own row counts:
+
+```
+File Creation Date: Wed Sep  2 08:00:10 EDT 2026
+   819 /home/pubacc/scripts/licdayzipdata/AM.dat
+    91 /home/pubacc/scripts/licdayzipdata/CO.dat
+   ...
+  5812 total
+```
+
+Notes that matter when parsing it:
+
+- **CRLF line endings**, single-digit days padded with an extra space, and
+  a timezone **abbreviation** (`EDT`/`EST`) that `strptime`'s `%Z` cannot
+  portably parse. Capture the abbreviation, discard it, and re-interpret
+  the wall clock in `America/New_York`.
+- `File Creation Date` is the **publication** time and equals
+  `Last-Modified` **exactly** (`Sun Sep 6 09:00:11 EDT` = `Sun, 06 Sep
+  2026 13:00:11 GMT`). That equivalence is what lets it date a file whose
+  `Last-Modified` header is missing, instead of skipping it forever.
+- **Do not compare against the `total` line.** It counts record types this
+  project deliberately skips (`CO`, `SC`, `LA`, `SF`), so it would report
+  a permanent false mismatch. Sum only the `.dat` files actually ingested.
+
+Verified end-to-end against production twice, exactly: amateur 2026-09-01
+summed to **5,691** and ship 2026-09-02 to **219**, both matching
+`ingest_runs.rows_ingested` to the row.
+
+### Empty daily archives are normal
+
+`l_am_mon.zip` and `l_am_sun.zip` were both **212 bytes** — a valid zip
+containing only `counts` and **no `.dat` members at all** (Sunday was a
+weekend; Monday 2026-09-07 was Labor Day). Roughly 2–3 of every 7 days are
+empty this way. This is a successful ingest of zero rows, not a failure —
+treating it as failure would mean retrying those days forever.
+
 ## 3. Field layout documentation
 
 - Generic ULS data dictionary (covers Amateur's `HD`/`EN`/`AM`/etc.):

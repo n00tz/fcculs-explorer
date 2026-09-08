@@ -2414,6 +2414,21 @@ so they aren't lost or accidentally reinvented differently later:
   substantially cheaper: adding a service is now largely a config-dict
   entry on both the API and frontend sides rather than new hand-written
   modules.
+- **`REFRESH MATERIALIZED VIEW ... CONCURRENTLY`** for the three
+  identity/aggregation views. Today's refresh takes an `ACCESS EXCLUSIVE`
+  lock for ~21.5 s total (`identity_by_frn` 6.5 s, `towers_by_site` 0.9 s,
+  `entities_by_address` 14.1 s, all measured on production), blocking the
+  detail pages that read them. `CONCURRENTLY` would avoid that lock but
+  **requires a unique index, and one cannot currently be created**:
+  `identity_by_frn` is a `UNION ALL`
+  (`db/009_identity_views_all_services.sql`) carrying **10,165 duplicate
+  rows** on `(frn, source, subject_key)` out of 2,311,553 — verified by
+  query. Fixing it means changing the view definition itself, which is its
+  own change with its own correctness risk, so it was explicitly left out
+  of the 15-minute-polling work. It became slightly more relevant with
+  that change, since refreshes went from ~1/day to ~2–3/day (tower
+  publishes ~05:00 UTC, amateur/GMRS ~12:00 UTC, so they no longer
+  coalesce into a single nightly run).
 - **An MCP (Model Context Protocol) server** — ✅ **built and deployed.**
   See "§12a. MCP Server" below for the design, and the
   "2026-09-07 — MCP server built, tested, and live" Progress Log entry for

@@ -2,6 +2,7 @@
 Run with: python3 -m unittest ingestor/tests/test_parser.py
 (stdlib unittest only -- no pytest dependency required)
 """
+import datetime
 import sys
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from parser import parse_dat_file, RowFieldCountMismatch
+import parser
 import schemas
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -198,3 +200,83 @@ class TestSharedULSSchemas(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestParseCounts(unittest.TestCase):
+    """Every FCC archive carries a `counts` member declaring its own row
+    count per file. The strings below are REAL, captured verbatim from
+    l_am_tue.zip / l_sh_wed.zip / l_am_sun.zip on 2026-09-08 -- including
+    the CRLF line endings and the padded single-digit day, both of which a
+    hand-written approximation would quietly omit.
+    """
+
+    AMATEUR = (
+        "File Creation Date: Wed Sep  2 08:00:10 EDT 2026\r\n"
+        "   819 /home/pubacc/scripts/licdayzipdata/AM.dat\r\n"
+        "    91 /home/pubacc/scripts/licdayzipdata/CO.dat\r\n"
+        "   819 /home/pubacc/scripts/licdayzipdata/EN.dat\r\n"
+        "   819 /home/pubacc/scripts/licdayzipdata/HD.dat\r\n"
+        "  3234 /home/pubacc/scripts/licdayzipdata/HS.dat\r\n"
+        "     3 /home/pubacc/scripts/licdayzipdata/LA.dat\r\n"
+        "    27 /home/pubacc/scripts/licdayzipdata/SC.dat\r\n"
+        "  5812 total\r\n"
+    )
+    # A weekend/holiday archive: 212 bytes, `counts` only, no .dat at all.
+    EMPTY = "File Creation Date: Mon Sep  7 08:00:09 EDT 2026\r\n"
+
+    def test_row_counts_are_keyed_by_bare_filename(self):
+        counts = parser.parse_counts(self.AMATEUR)
+        self.assertEqual(counts.rows["HD.dat"], 819)
+        self.assertEqual(counts.rows["HS.dat"], 3234)
+        # Keyed by name, not by FCC's internal absolute path, so it lines up
+        # with what extract_zip() produces.
+        self.assertNotIn("/home/pubacc/scripts/licdayzipdata/HD.dat", counts.rows)
+
+    def test_amateur_ingested_types_sum_to_the_value_verified_on_production(self):
+        # 819 + 819 + 819 + 3234 = 5691, which matched ingest_runs
+        # .rows_ingested exactly for amateur 2026-09-01.
+        counts = parser.parse_counts(self.AMATEUR)
+        ingested = ["AM.dat", "EN.dat", "HD.dat", "HS.dat"]
+        self.assertEqual(sum(counts.rows[f] for f in ingested), 5691)
+
+    def test_total_line_is_not_captured_as_a_file(self):
+        """FCC's trailing "N total" counts record types this project does
+        not ingest, so treating it as a file would produce a permanent
+        false mismatch on every archive."""
+        counts = parser.parse_counts(self.AMATEUR)
+        self.assertNotIn("total", counts.rows)
+        self.assertEqual(len(counts.rows), 7)
+
+    def test_creation_date_is_converted_from_eastern_to_utc(self):
+        # "Wed Sep  2 08:00:10 EDT 2026" -> 12:00:10Z, which matches that
+        # archive's Last-Modified header exactly. That equivalence is why
+        # this can date a file whose Last-Modified is missing.
+        counts = parser.parse_counts(self.AMATEUR)
+        self.assertEqual(
+            counts.created_at,
+            datetime.datetime(2026, 9, 2, 12, 0, 10, tzinfo=datetime.timezone.utc),
+        )
+
+    def test_winter_archive_uses_est_not_a_hardcoded_offset(self):
+        counts = parser.parse_counts("File Creation Date: Thu Jan 15 08:00:00 EST 2026\r\n")
+        self.assertEqual(counts.created_at.hour, 13)  # UTC-5
+
+    def test_empty_weekend_archive_parses_with_no_rows(self):
+        counts = parser.parse_counts(self.EMPTY)
+        self.assertEqual(counts.rows, {})
+        self.assertIsNotNone(counts.created_at)
+
+    def test_unparseable_counts_is_tolerated(self):
+        # Metadata failing to parse must never block an otherwise-valid
+        # ingest; callers read this as "no integrity oracle available".
+        counts = parser.parse_counts("something entirely unexpected")
+        self.assertEqual(counts.rows, {})
+        self.assertIsNone(counts.created_at)
+
+    def test_unparseable_creation_date_does_not_lose_the_row_counts(self):
+        counts = parser.parse_counts(
+            "File Creation Date: sometime last Tuesday\r\n"
+            "   819 /home/pubacc/scripts/licdayzipdata/HD.dat\r\n"
+        )
+        self.assertIsNone(counts.created_at)
+        self.assertEqual(counts.rows["HD.dat"], 819)

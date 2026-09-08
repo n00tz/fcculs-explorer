@@ -154,6 +154,73 @@ def main():
 
     print("ALL NEW-HAMS CELEBRATION FLAG CHECKS PASSED")
 
+    check_advisory_lock_prevents_duplicate_events(conn)
+    check_complete_dump_observation(conn)
+
+
+def check_advisory_lock_prevents_duplicate_events(conn):
+    """The regression test for the reason polling needs a lock at all.
+
+    `change_events` has no unique constraint, and differ.diff_rows()
+    compares each row against the CURRENTLY STORED row. Two ingests of the
+    same day that interleave -- both reading the old row before either
+    upserts -- therefore each emit a full set of change events, and the
+    notifier turns those into DUPLICATE USER ALERTS. Under the old daily
+    cron that was effectively impossible; polling every 15 minutes makes a
+    slow run overlapping the next tick, or a poll racing an operator's
+    manual --catch-up, entirely plausible.
+
+    This uses two REAL Postgres sessions, not mocks: the whole point is
+    that the mutual exclusion is enforced by the database, and a mocked
+    lock would prove nothing about that.
+    """
+    from db import ingest_advisory_lock
+
+    second = psycopg.connect(DSN)
+    try:
+        with ingest_advisory_lock(conn) as first_acquired:
+            assert first_acquired is True, "first session must acquire the ingest lock"
+            with ingest_advisory_lock(second) as second_acquired:
+                assert second_acquired is False, (
+                    "a second concurrent session MUST NOT acquire the ingest lock -- "
+                    "without this, overlapping ingests emit duplicate change_events "
+                    "and users receive duplicate alerts"
+                )
+
+        # Once the first session releases it, the lock is available again --
+        # proving it is not leaked and does not need manual cleanup.
+        with ingest_advisory_lock(second) as reacquired:
+            assert reacquired is True, "lock must be released when the ingest finishes"
+    finally:
+        second.close()
+
+    print("ALL ADVISORY LOCK CHECKS PASSED")
+
+
+def check_complete_dump_observation(conn):
+    """The poller records the newest weekly complete dump it sees so an
+    operator can decide whether to re-bootstrap. It must report 'new' only
+    once per dump, or the log would announce the same snapshot every hour.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from db import latest_complete_dumps, record_complete_dump
+
+    first_seen = datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc)
+    assert record_complete_dump(conn, "amateur", "l_amat.zip", first_seen, 197_000_000) is True
+
+    # Same dump observed again on the next sweep: not news.
+    assert record_complete_dump(conn, "amateur", "l_amat.zip", first_seen, 197_000_000) is False
+
+    newer = first_seen + timedelta(days=7)
+    assert record_complete_dump(conn, "amateur", "l_amat.zip", newer, 198_000_000) is True
+
+    recorded = latest_complete_dumps(conn)
+    assert recorded["amateur"]["published_at"] == newer, recorded
+    assert recorded["amateur"]["size_bytes"] == 198_000_000, recorded
+
+    print("ALL COMPLETE-DUMP OBSERVATION CHECKS PASSED")
+
 
 if __name__ == "__main__":
     main()

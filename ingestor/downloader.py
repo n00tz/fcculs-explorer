@@ -25,6 +25,8 @@ from pathlib import Path
 
 import httpx
 
+import parser
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://data.fcc.gov/download/pub/uls"
@@ -151,6 +153,35 @@ def resolve_daily_data_date(day_of_week: str, last_modified: datetime | None) ->
         if candidate.weekday() == target_weekday:
             return candidate
     return None  # unreachable: any 8-day window contains every weekday
+
+
+def read_archive_counts(content: bytes):
+    """Read and parse the `counts` member from a downloaded archive.
+
+    Every FCC archive carries one. It declares FCC's own row count per
+    `.dat` file -- an authoritative integrity oracle for what we parsed --
+    plus the archive's creation (publication) timestamp.
+
+    This is a separate reader rather than an extra return value from
+    extract_zip() so that function's contract (and every existing caller)
+    stays unchanged; `counts` is metadata about the archive, not extracted
+    content, and callers that don't want it shouldn't have to unpack it.
+
+    Returns an empty ArchiveCounts rather than raising if the member is
+    missing or unreadable: failing to read metadata must never block an
+    otherwise-valid ingest.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            names = [n for n in zf.namelist() if Path(n).name == "counts"]
+            if not names:
+                logger.warning("archive has no `counts` member; integrity check unavailable")
+                return parser.ArchiveCounts(rows={}, created_at=None)
+            raw = zf.read(names[0])
+    except (zipfile.BadZipFile, KeyError, OSError) as exc:
+        logger.warning("could not read `counts` from archive: %s", exc)
+        return parser.ArchiveCounts(rows={}, created_at=None)
+    return parser.parse_counts(raw.decode("utf-8", errors="replace"))
 
 
 def extract_zip(content: bytes, dest_dir: Path) -> list[Path]:
