@@ -39,7 +39,7 @@ the service — see `README.md` for that.
 
 ## What's in here
 
-Five FCC datasets, refreshed every day from the FCC's public ULS
+Five FCC datasets, refreshed throughout the day from the FCC's public ULS
 transaction files:
 
 - **Amateur Radio Service** — every licensed ham radio callsign: the
@@ -148,11 +148,11 @@ here, so this stays a genuine "welcome to the hobby" celebration list
 rather than getting cluttered with license changes for people who are
 already hams.
 
-**When does this update?** Automatically, every day, right after the
-site pulls in the FCC's daily update. There's nothing you need to do —
-just check back and the list (and the counts at the top) will reflect
-whatever's new. Names drop off the list once their grant is more than
-10 days old.
+**When does this update?** Automatically, shortly after the FCC publishes
+a day's amateur-radio file — usually within about 15 minutes. There's
+nothing you need to do — just check back and the list (and the counts at
+the top) will reflect whatever's new. Names drop off the list once their
+grant is more than 10 days old.
 
 ## Searching
 
@@ -419,7 +419,7 @@ Once signed in, **My Watches** lets you:
    if you deliberately want to hear about, say, GMRS changes and nothing
    else. Watches you created before this option existed keep working
    exactly as they did — they're already set to "All services".
-4. When the daily FCC data refresh detects a change to something you're
+4. When this site picks up an FCC update that changes something you're
    watching, a notification is sent through your chosen channel(s).
 
 You can have multiple watches pointing at different channels (e.g. get a
@@ -429,8 +429,8 @@ Delete a watch or channel at any time from the same page; deleting a
 channel that still has watches attached will stop those watches from
 being able to deliver until you point them at a different channel.
 
-**What counts as a "change"?** Anything the daily ingestion detects as
-different from what was previously stored for that identity — for
+**What counts as a "change"?** Anything an FCC update changes from what
+was previously stored for that identity — for
 example, a status change, an address update, a renewal/expiration date
 change, or a reassignment. The same field-level list appears in the
 **Change History** section of the identity's own detail page, so you can
@@ -575,7 +575,8 @@ Some things worth knowing:
 - **Double-check anything important.** The assistant is reading real FCC
   data, but it's still an AI and can misread or over-summarize. For
   anything that matters, follow up on the actual page — and remember this
-  site is a daily mirror of FCC data, not the official source of record.
+  site is a frequently updated mirror of FCC data, not the official
+  source of record.
 
 If your assistant reports that it can't connect, make sure you used the
 address exactly as shown above and that it's configured as a remote HTTP
@@ -591,11 +592,11 @@ License History table below shows every holder's activity on that
 callsign over time, so you can see the full lineage.
 
 **How often is the data updated?**
-Daily, from FCC's public transaction files. The exact time depends on
-your instance's configuration (an operator setting, not something you
-control from the UI). The 🎉 New Hams list and its counts update
-automatically right along with everything else, with nothing you need
-to do.
+Throughout the day, from FCC's public transaction files. The site checks
+for new files about every 15 minutes, so a newly published FCC update
+usually appears here shortly after FCC posts it — not the next calendar
+day. The 🎉 New Hams list and its counts update automatically right
+along with everything else, with nothing you need to do.
 
 **I searched for something and got no results — is the data missing?**
 This instance covers Amateur Radio, GMRS, Aircraft (Part 87), Ship
@@ -615,9 +616,9 @@ exhaustive reference.
 list?**
 Yes, automatically, as long as this is genuinely the very first amateur
 license the FCC has ever recorded for your FRN — no action needed on
-your part. It'll appear the day after the FCC's daily file that includes
-your grant is processed by this site, and it stays on the list for 10
-days.
+your part. It'll appear shortly after this site processes the FCC file
+that includes your grant (usually within about 15 minutes of FCC
+publishing that file), and it stays on the list for 10 days.
 
 **I created a watch but haven't gotten an alert — is something wrong?**
 First, try the **Send test** button on that channel to confirm it's

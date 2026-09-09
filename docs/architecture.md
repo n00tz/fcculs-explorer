@@ -14,6 +14,8 @@ sync with the source. Edit the code blocks directly.
 - [1. System topology](#1-system-topology) — containers, networks, volumes
 - [2. Level-0 data flow](#2-level-0-data-flow) — FCC to end user
 - [3. Ingestion: daily catch-up logic](#3-ingestion-daily-catch-up-logic)
+  - [3a. The poll cycle](#3a-the-poll-cycle)
+  - [3b. The ingest job](#3b-the-ingest-job)
 - [4. Parsing: file to record](#4-parsing-file-to-record) — FCC's three delimiter hazards
 - [5. Ingestion: per-row decision logic](#5-ingestion-per-row-decision-logic)
 - [6. Notification pipeline](#6-notification-pipeline)
@@ -109,7 +111,7 @@ write) and **serve** (on-demand, read), joined only by Postgres.
 flowchart LR
     fcc[/"FCC ULS<br/>weekly dumps +<br/>daily transaction files"/]
 
-    subgraph ingestpath["Ingest path — scheduled, writes"]
+    subgraph ingestpath["Ingest path — polled (~15 min), writes"]
         dl["download<br/>+ unzip"]
         parse["parse<br/>pipe-delimited .dat"]
         diff["diff vs<br/>current DB row"]
@@ -195,12 +197,20 @@ were confirmed against the live server rather than assumed:
   `200` and the full body. Only `If-Modified-Since` produces a `304`. The
   "obvious" ETag implementation would silently transfer everything on
   every poll while appearing to work.
+- **Listing timestamps are US Eastern, not UTC.** They are converted with
+  `ZoneInfo("America/New_York")`, never a fixed offset — a constant −4
+  would pass every test writable in summer and then misdate every file
+  after the November DST change.
 - **The listing is a static `index.html`, not live autoindex output**, and
   it can lag the files it describes by hours. Index-only polling therefore
   *cannot* guarantee detection within one interval — which is the whole
   objective. Hence the hybrid: the listing is the cheap primary signal,
   and the poller still issues targeted `HEAD`s for the handful of dates it
   knows are still outstanding.
+- **The listing is regenerated hourly at ~:15 UTC** even when no ULS file
+  changed. One poll an hour therefore legitimately sees a `200`; the other
+  three in that hour see `304`s. A `:15` `200` is not a broken conditional
+  request.
 
 Correctness never rests on the 304. What gets ingested is decided by the
 `ingest_runs` table; the listing only decides how cheaply that decision
@@ -223,6 +233,10 @@ flowchart TD
 Every `INGEST_FULL_SWEEP_MINUTES` (default 60) the 304 fast path is
 ignored and all files are re-checked directly, covering FCC re-publishing
 an older weekday file without the listing reflecting it.
+
+Weekly complete dumps (`l_amat.zip`, `r_tower.zip`, …) are **observed**,
+not auto-loaded: a new dump is recorded in `complete_dumps` and reported
+by `--status`. Applying one is still a deliberate `--bootstrap`.
 
 The ingest phase is wrapped in `pg_try_advisory_lock`. `change_events` has
 no unique constraint and the differ compares against the *currently

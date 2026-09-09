@@ -1,5 +1,31 @@
 # FCC ULS Explorer & Alerting Service — Implementation Plan
 
+## Current shipped state (2026-09-09)
+
+Sections 1–8 below are the **original v1 design**, not a description of
+what runs today. They still say Amateur + Tower only, Python 3.12,
+SQLAlchemy/asyncpg, and a daily ingest cron. Those were starting
+assumptions; they were superseded in the build. The live system is
+documented in `README.md` and `docs/architecture.md`, and the path from
+this plan to that system is the Progress Log in §10.
+
+What is actually shipped:
+
+- **Data.** Amateur Radio, ASR Tower, GMRS, Aircraft (Part 87), and Ship
+  (Part 80). Other ULS services remain deferred (§12).
+- **Stack.** Python 3.14 + FastAPI + `psycopg` (not SQLAlchemy), SvelteKit
+  on `node:26-slim` → `caddy:2-alpine`, PostgreSQL 16, Redis 7. MCP server
+  in `mcpsrv/`, live at `/mcp`.
+- **Ingest.** A 15-minute poll of FCC's daily directory listing, not a
+  once-daily cron. See `docs/architecture.md` §3a.
+- **Product.** Browse/search/detail for all five datasets, identity
+  grouping (FRN/address/site), watches and alerts, New Hams (Amateur-only,
+  with operator class), and the MCP tool surface. Pagination reports
+  current page, total pages, and total records.
+- **Not built.** Published OpenAPI/Swagger contract (§12b), address
+  normalization for identity grouping, `REFRESH MATERIALIZED VIEW ...
+  CONCURRENTLY`.
+
 ## 1. Problem Statement
 
 Build a self-hostable, OCI-container-deployable web application that ingests FCC
@@ -37,6 +63,8 @@ No rich admin/data-editing UI in v1 — data is read-only, sourced solely from F
   user chooses per-watch.
 - **v1 data scope**: Amateur Radio service + ASR Tower data only. Other ULS
   services (commercial, GMRS, etc.) deferred to a later phase.
+  *(Superseded: GMRS, Aircraft, and Ship later shipped at the same
+  fidelity as Amateur. Remaining ULS services are still deferred — §12.)*
 - **Backend/frontend framework**: no strong preference — proposed below,
   optimized for container simplicity on a single host and low ongoing
   maintenance.
@@ -57,6 +85,12 @@ No rich admin/data-editing UI in v1 — data is read-only, sourced solely from F
 
 All app containers run as a non-root `USER` in their Dockerfile; Postgres/Redis
 official images already support rootless/arbitrary UID operation.
+
+> **Drift from this table (do not "correct" the table — it is the original
+> proposal):** runtime Python is **3.14**, the frontend build image is
+> **`node:26-slim`**, the DB driver is **`psycopg`** (SQLAlchemy/asyncpg
+> were never adopted), and the scheduler is an interval **poll**, not a
+> daily cron. Current pins live in `README.md`'s SBOM.
 
 ## 4. Data Ingestion Design
 
@@ -2550,6 +2584,43 @@ interval tick returned `200` rather than `304`. Probing the server showed
 the listing had genuinely been regenerated at `15:15:18 GMT`, *after* the
 startup poll cached its value — which is finding 4 above, and the reason
 that finding is recorded at all.
+
+### 2026-09-09 — Ingestor unit tests in CI, and a docs pass
+
+`.github/workflows/tests.yml` now has an `ingestor` job alongside
+`api`/`notifier`/`mcpsrv`/`web`. It installs `ingestor/requirements.txt`
+(pytest is already listed there) on Python 3.12 — the same CI-vs-runtime
+gap the other Python jobs already have against `python:3.14-slim` — and
+runs the four mocked files (`test_parser`, `test_differ`,
+`test_scheduler`, `test_index_scraper`). No `/app` symlink: unlike the
+other three Python services, these tests inject `sys.path` from the file
+location. `integration_test.py` stays out of CI for the same reason as
+everywhere else.
+
+Verified in a real Actions run on `91b3289`:
+https://github.com/n00tz/fcculs-explorer/actions/runs/34302358413 —
+`ingestor` collected 89 items and reported `89 passed, 35 subtests
+passed`, including the poll-cycle / advisory-lock / counts / index-scraper
+tests added the day before. CI green is still necessary-but-not-sufficient;
+`ingestor/tests/run_integration.sh` remains required before an ingest
+change is done.
+
+A subsequent docs pass caught the places those last two days of work had
+left stale:
+
+- `docs/plan.md` §§1–8 still described the original v1 proposal (Amateur +
+  Tower, Python 3.12, SQLAlchemy, daily cron) as if it were current. A
+  **Current shipped state** section now sits above them; the original
+  sections are left as the design record they are.
+- `docs/architecture.md` §3a was missing two load-bearing FCC findings
+  (Eastern listing timestamps; hourly `index.html` regeneration at ~:15)
+  and still labelled the ingest path "scheduled". Contents now lists 3a/3b.
+- `docs/user-guide.md` still told end users data refreshed "every day" /
+  "the day after" FCC published. It now describes the ~15-minute poll in
+  plain language.
+- `README.md` rate-limit, Dependabot, attribution, and status lines had
+  not picked up personal-radio services, `mcpsrv`, or the current base
+  image tags.
 
 ## 12. Future Features (Deferred)
 

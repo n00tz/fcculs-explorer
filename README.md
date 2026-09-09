@@ -11,12 +11,14 @@ services required.
 
 ## Status
 
-Feature-complete for v1: ingestion, API, notifier, frontend, containerization,
-and the Compose stack are all built and verified. See `docs/plan.md` for the
-full design rationale and progress log.
+Feature-complete for v1: five-dataset ingestion (polled ~every 15 minutes),
+API, notifier, frontend, MCP server, containerization, and the
+Compose/Quadlet stack are all built and verified. See `docs/plan.md` for
+the full design rationale and progress log.
 
-**Looking to use the app (search, browse, filters, sign-in, watches/alerts)
-rather than deploy or administer it? See `docs/user-guide.md`.**
+**Looking to use the app (search, browse, filters, sign-in, watches/alerts,
+or the MCP assistant tools) rather than deploy or administer it? See
+`docs/user-guide.md`.**
 
 ## Stack
 
@@ -586,7 +588,7 @@ when diagnosing — the server logs every upstream API call it makes.
 | `TRUST_REQUEST_HOST` | api | Set to `false` to always use `PUBLIC_BASE_URL` instead of deriving the base URL from request headers (default `true`) |
 | `PUBLISHED_PORT` | web | Host port the Caddy/web container is published on |
 | `CORS_ALLOW_ORIGINS` | api | Comma-separated list of origins allowed to make credentialed (cookie-carrying) cross-origin requests to the API. **Must be the real public hostname(s) users reach the app at** (e.g. your Cloudflare Tunnel domain) — never a wildcard, since browsers respond to a wildcard + credentials combination by letting *any* site ride a signed-in user's or admin's session cookie. Change any time by editing `.env` and restarting the `api` service (`podman compose restart api`, or `systemctl --user restart fcculs-api` under Quadlets) — no image rebuild required. Multiple origins: `CORS_ALLOW_ORIGINS=https://a.example,https://b.example` |
-| `RATE_LIMIT_SEARCH_MAX`, `RATE_LIMIT_SEARCH_WINDOW_SECONDS` | api | Per-client-IP rate limit (default 60 requests/60 seconds) applied to the unauthenticated `/api/search`, `/api/amateur` browse, and `/api/towers` browse endpoints — the app's easiest DoS/cost-abuse surface once exposed to the internet, since they run trigram/filter queries against multi-million-row tables. Change any time by editing `.env` and restarting the `api` service — no rebuild required |
+| `RATE_LIMIT_SEARCH_MAX`, `RATE_LIMIT_SEARCH_WINDOW_SECONDS` | api | Per-client-IP rate limit (default 60 requests/60 seconds) applied to the unauthenticated search, browse, detail, new-hams, identity, history, and field-definition endpoints across all five datasets — the app's easiest DoS/cost-abuse surface once exposed to the internet, since they run trigram/filter queries against multi-million-row tables. Change any time by editing `.env` and restarting the `api` service — no rebuild required |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `SMTP_FROM_ADDRESS` | api, notifier | Outbound SMTP relay for magic-links and email/email-to-SMS alerts |
 | `INGEST_POLL_MINUTES` | ingestor | How often to check FCC for newly published daily files (default 15). Replaced the old fixed daily run time: FCC's publication window is irregular (tower ~05:00 UTC, amateur/GMRS ~12:00 UTC, and observed as late as 13:00), so a single daily run meant a late file waited until the *next* day. A poll normally costs **one** conditional HTTP request that returns `304 Not Modified` with no body |
 | `INGEST_FULL_SWEEP_MINUTES` | ingestor | How often to bypass the "nothing changed" fast path and re-check every file directly (default 60). Covers FCC re-publishing an older weekday file without its statically-generated directory listing reflecting it yet |
@@ -685,9 +687,9 @@ are still required before considering any change done; CI complements that
 process, it doesn't replace it.
 
 **Dependabot (`.github/dependabot.yml`)** checks weekly for updates to
-each service's Python (`api`/`notifier`/`ingestor`) and npm (`web`)
-dependencies, plus each service's Dockerfile base image (so a floating
-tag like `python:3.12-slim`/`node:22-slim`/`postgres:16-alpine`/
+each service's Python (`api`/`notifier`/`ingestor`/`mcpsrv`) and npm
+(`web`) dependencies, plus each service's Dockerfile base image (so a
+floating tag like `python:3.14-slim`/`node:26-slim`/`postgres:16-alpine`/
 `redis:7-alpine`/`caddy:2-alpine` gets flagged when a new upstream
 patch/security release lands — a locally cached image won't surface
 that on its own). Dependabot PRs are **not** auto-merged: review and
@@ -699,9 +701,9 @@ changes that a plain code review won't catch.
 
 ## License / Attribution
 
-FCC ULS data (Amateur Radio Service and Antenna Structure Registration
-records) is public domain U.S. government data, published under the FCC's
-public access program. This project performs no modification to the
+FCC ULS data (Amateur Radio, GMRS, Aircraft, Ship, and Antenna Structure
+Registration records) is public domain U.S. government data, published
+under the FCC's public access program. This project performs no modification to the
 underlying licensing/registration facts — it republishes and diffs the
 same public records FCC itself publishes. Attribution: data sourced from
 the Federal Communications Commission, Universal Licensing System (ULS),
