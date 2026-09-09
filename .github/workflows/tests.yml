@@ -151,6 +151,51 @@ jobs:
           # necessary but not sufficient, exactly as this file's header
           # comment already states for the other jobs.
 
+  ingestor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12 to match the api/notifier/mcpsrv jobs above.
+          # ingestor/Dockerfile runs python:3.14-slim, so CI is a version
+          # behind the runtime image -- the same established gap the other
+          # three Python jobs already have, rather than a fifth pattern.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ingestor/requirements.txt
+
+      - name: Install dependencies
+        # pytest is already in ingestor/requirements.txt (same as api and
+        # notifier), so there is no separate install step and no
+        # production-image contamination concern of the kind mcpsrv has.
+        run: pip install -r ingestor/requirements.txt
+
+      # No /app symlink. Unlike api/notifier/mcpsrv, every ingestor unit
+      # test resolves its import path itself via
+      # `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))`
+      # (or `.parent.parent`) rather than hardcoding /app, so they run
+      # correctly from $GITHUB_WORKSPACE/ingestor with no extra staging.
+
+      - name: Run mocked unit tests (no real Postgres/Redis/network)
+        run: |
+          python3 -m pytest \
+            ingestor/tests/test_parser.py \
+            ingestor/tests/test_differ.py \
+            ingestor/tests/test_scheduler.py \
+            ingestor/tests/test_index_scraper.py \
+            -v
+          # NOT run here (needs a real Postgres + the disposable Podman
+          # pod from ingestor/tests/run_integration.sh):
+          #   integration_test.py
+          #
+          # This job only wires the *unit* tests into CI. A green run is
+          # necessary but not sufficient -- run_integration.sh is still
+          # required before any ingestor change (including future
+          # scheduler/polling changes) is considered done, exactly as this
+          # file's header comment already states for the other jobs.
+
   web:
     runs-on: ubuntu-latest
     # There is no JS/Svelte unit test suite in this repo yet (no test

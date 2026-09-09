@@ -670,11 +670,13 @@ covers.
 
 **CI (`.github/workflows/tests.yml`)** runs on every push/PR against
 `master` as a fast first line of defense — separate
-`api`/`notifier`/`mcpsrv`/`web` jobs, each installing that service's real
-dependencies (`requirements.txt`/`package.json`) and running only the
-subset of tests that need no real Postgres/Redis/SMTP/network (the mocked
-`unittest`-style files; `mcpsrv` runs its 12 mocked tool tests; `web` runs
-a static `npm run build` since there's no JS unit suite yet).
+`api`/`notifier`/`mcpsrv`/`ingestor`/`web` jobs, each installing that
+service's real dependencies (`requirements.txt`/`package.json`) and running
+only the subset of tests that need no real Postgres/Redis/SMTP/network
+(the mocked `unittest`-style files; `mcpsrv` runs its 12 mocked tool
+tests; `ingestor` runs its four mocked files including the poll-cycle
+scheduler tests; `web` runs a static `npm run build` since there's no JS
+unit suite yet).
 It intentionally does **not** run `integration_test.py`,
 `real_smtp_smoke_test.py`, `mcpsrv/tests/live_check.py`, or anything else
 needing live infrastructure — those stay part of the manual
