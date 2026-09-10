@@ -3388,3 +3388,65 @@ independent.
   `describe_code` remains the way to interpret codes, and the OpenAPI
   descriptions should say so rather than implying the raw values are
   self-explanatory.
+
+### Progress Log — investigated a "no new hams since 09-05" report; fixed a real re-ingest gap
+
+User-reported: no New Hams entries since 2026-09-05, when at least one
+was expected. Investigated end-to-end rather than assuming either "it's
+fine" or "it's a bug" -- both turned out to be true, for two unrelated
+reasons.
+
+**Not a bug:** the 2026-09-08 amateur daily file genuinely contained zero
+first-time grants. Verified two ways: the archive's SHA256 exactly
+matches the one currently live on data.fcc.gov (so nothing was silently
+republished with more content since we ingested it), and manual
+inspection of the raw `HD.dat`/`EN.dat` rows showed the day's few
+`license_granted` events are renewals (e.g. a 2016 grant renewing for
+another 10-year term) and second/vanity callsigns for existing
+licensees -- correctly *not* flagged `is_new_operator`. A quiet day, not
+a pipeline defect.
+
+**A real gap, found while ruling that out:** `run_daily_job`'s pending
+filter only ever checked "does `ingest_runs` have a `success` row for
+this `(service, data_date)`" and never revisited a date once recorded --
+even if FCC republishes that same weekday-named file later with
+different/fuller content. Given FCC's documented publication
+unreliability, a thin/partial early publish would have been locked in as
+final forever, silently. Fixed by comparing each already-"done" day's
+freshly discovered Last-Modified against what was stored in
+`ingest_runs` at last ingest (new `db.ingested_last_modified()`); a newer
+timestamp means FCC republished and the day goes back into `pending`.
+Safe by construction: ingestion is upsert-based and diffs against
+current DB state, so re-ingesting a day can never duplicate
+`change_events`/alerts.
+
+**A second, separate finding along the way:** `change_events.service`
+was `NULL` for ~15.5k amateur/tower rows dated 2026-08-31..2026-09-05 --
+a stale artifact from before the personal-radio-services generalization
+added per-service tagging (current `ingest_file()`/`service_for_table()`
+already tags every service correctly, confirmed live for gmrs/aircraft/
+ship in the same window and for amateur/tower from 09-07 onward).
+Backfilled the historical rows by `subject_type` (`amateur_license` ->
+`amateur`, `tower` -> `tower`). Did not affect `get_new_hams` (it doesn't
+filter by service) but would have silently broken any future
+service-scoped query over that window.
+
+Added 3 new scheduler tests (newer-Last-Modified triggers re-ingest,
+same/older is left alone, missing prior Last-Modified doesn't force a
+spurious re-ingest). Verified: 98/98 mocked unit tests, full
+`run_integration.sh` against real Postgres, and live in production --
+`podman logs ingestor` after the rebuild shows a clean startup poll
+(`GET .../daily/` 200, all 5 services "nothing to do") with no errors.
+Deployed via `deploy/update.sh` at commit `2dc5898`.
+
+**Not yet done: this commit is not pushed to GitHub.** The production
+host's git config (`user.name`/`user.email` and any stored credential for
+`https://github.com/n00tz/fcculs-explorer.git`) is gone -- no
+`~/.gitconfig`, no cached credential helper, no SSH key. The commit
+exists locally on `fcculs@10.64.3.39` (`master`, `2dc5898`) and is
+already deployed and running, but needs to be pushed from a machine/
+session that has push credentials before it is visible on GitHub or safe
+to build on top of from a fresh clone.
+
+Files touched: `ingestor/db.py`, `ingestor/scheduler.py`,
+`ingestor/tests/test_scheduler.py`, `docs/plan.md` (this entry).
