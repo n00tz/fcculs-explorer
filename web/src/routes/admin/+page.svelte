@@ -242,37 +242,37 @@
 		{:else if opsError}
 			<p class="error">{opsError}</p>
 		{:else if ops}
-			<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
-				<div class="card">
-					<h3 style="margin-top: 0;">Ingest &amp; polling</h3>
-					<p>
-						Poller loop:
-						<span class="pill hb-{ops.ingest.heartbeat_state}">{ops.ingest.heartbeat_state}</span>
-						<span class="muted">({ageLabel(ops.ingest.heartbeat_age_seconds)})</span>
-					</p>
-					<table>
-						<thead>
-							<tr><th>Service</th><th>Last data date</th><th>Last ingested</th><th>Status</th></tr>
-						</thead>
-						<tbody>
-							{#each ops.ingest.services as s}
-								<tr>
-									<td>{s.service}</td>
-									<td>{s.last_data_date ?? '—'}</td>
-									<td>{s.last_ingested_at ?? '—'}</td>
-									<td>
-										{#if s.status}
-											<span class="pill hb-{s.status === 'success' ? 'ok' : 'stale'}">{s.status}</span>
-										{:else}
-											<span class="pill hb-unknown">none yet</span>
-										{/if}
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
+			<div class="card" style="overflow-x: auto;">
+				<h3 style="margin-top: 0;">Ingest &amp; polling</h3>
+				<p>
+					Poller loop:
+					<span class="pill hb-{ops.ingest.heartbeat_state}">{ops.ingest.heartbeat_state}</span>
+					<span class="muted">({ageLabel(ops.ingest.heartbeat_age_seconds)})</span>
+				</p>
+				<table>
+					<thead>
+						<tr><th>Service</th><th>Last data date</th><th>Last ingested</th><th>Status</th></tr>
+					</thead>
+					<tbody>
+						{#each ops.ingest.services as s}
+							<tr>
+								<td>{s.service}</td>
+								<td>{s.last_data_date ?? '—'}</td>
+								<td style="white-space: nowrap;">{s.last_ingested_at ?? '—'}</td>
+								<td>
+									{#if s.status}
+										<span class="pill hb-{s.status === 'success' ? 'ok' : 'stale'}">{s.status}</span>
+									{:else}
+										<span class="pill hb-unknown">none yet</span>
+									{/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
 
+			<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
 				<div class="card">
 					<h3 style="margin-top: 0;">New Hams / change activity</h3>
 					<p>Last 7 days: <strong>{ops.new_hams.last_7_days}</strong></p>
