@@ -76,6 +76,7 @@ from db import (
     ingested_last_modified,
     latest_complete_dumps,
     record_complete_dump,
+    record_heartbeat,
     record_ingest_run,
 )
 from downloader import (
@@ -541,6 +542,17 @@ def run_poll_cycle(state: PollState | None = None, services: list[str] | None = 
     now = now or datetime.now(timezone.utc)
     state.polls_since_heartbeat += 1
 
+    due_for_sweep = (
+        state.last_full_sweep is None
+        or (now - state.last_full_sweep) >= timedelta(minutes=FULL_SWEEP_MINUTES)
+    )
+    # Recorded unconditionally, before any of this function's exit paths
+    # (backoff-skip, steady-state no-op, normal work, or failure) -- so a
+    # stale row in service_heartbeats can only mean the loop itself stopped
+    # running, never "ran but found nothing to do". See
+    # db/011_ops_heartbeats.sql.
+    _record_db_heartbeat(state, due_for_sweep)
+
     if state.skip_polls_remaining > 0:
         state.skip_polls_remaining -= 1
         logger.debug(
@@ -551,11 +563,6 @@ def run_poll_cycle(state: PollState | None = None, services: list[str] | None = 
         return {}
 
     try:
-        due_for_sweep = (
-            state.last_full_sweep is None
-            or (now - state.last_full_sweep) >= timedelta(minutes=FULL_SWEEP_MINUTES)
-        )
-
         listing = index_scraper.fetch_listing(
             "daily",
             # A full sweep deliberately drops the conditional header so FCC
@@ -616,6 +623,33 @@ def run_poll_cycle(state: PollState | None = None, services: list[str] | None = 
         )
         _maybe_heartbeat(state, now)
         return {}
+
+
+def _record_db_heartbeat(state: PollState, due_for_sweep: bool) -> None:
+    """Upsert this poll cycle's ops heartbeat row.
+
+    Isolated in its own short-lived connection (rather than reusing the main
+    poll's connection) so it happens as early and unconditionally as
+    possible, and a later failure in the poll can never prevent it from
+    having been recorded.
+    """
+    try:
+        conn = psycopg.connect(DATABASE_URL, autocommit=False)
+        try:
+            record_heartbeat(
+                conn,
+                "ingestor-poll",
+                detail={
+                    "consecutive_failures": state.consecutive_failures,
+                    "skip_polls_remaining": state.skip_polls_remaining,
+                    "due_for_sweep": due_for_sweep,
+                },
+            )
+        finally:
+            conn.close()
+    except Exception:
+        # Heartbeat recording must never break the actual poll cycle.
+        logger.warning("failed to record ingestor-poll heartbeat", exc_info=True)
 
 
 def _maybe_heartbeat(state: PollState, now: datetime) -> None:

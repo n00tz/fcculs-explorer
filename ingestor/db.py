@@ -8,6 +8,7 @@ from datetime import date
 from typing import Iterable, Optional
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 
 def fetch_existing_row(conn: psycopg.Connection, table: str, key_cols: list[str], key_values: dict) -> Optional[dict]:
@@ -302,6 +303,34 @@ def record_complete_dump(conn: psycopg.Connection, service: str, filename: str,
         )
     conn.commit()
     return is_new
+
+
+# ---------------------------------------------------------------------------
+# Ops heartbeats
+# ---------------------------------------------------------------------------
+
+def record_heartbeat(conn: psycopg.Connection, service: str, detail: Optional[dict] = None) -> None:
+    """Upsert a heartbeat row for a background loop (see db/011_ops_heartbeats.sql).
+
+    Must be called unconditionally on every cycle of the loop it instruments
+    -- including "nothing to do" and backoff cycles -- so that heartbeat
+    staleness alone proves the loop stopped running, as distinct from "ran
+    but found nothing new". Commits immediately so a crash later in the same
+    cycle can't roll the heartbeat back with it.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO service_heartbeats (service, last_run_at, detail, updated_at)
+            VALUES (%s, now(), %s, now())
+            ON CONFLICT (service) DO UPDATE SET
+                last_run_at = EXCLUDED.last_run_at,
+                detail = EXCLUDED.detail,
+                updated_at = now()
+            """,
+            (service, Jsonb(detail) if detail is not None else None),
+        )
+    conn.commit()
 
 
 def latest_complete_dumps(conn: psycopg.Connection) -> dict:

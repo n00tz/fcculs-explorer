@@ -221,6 +221,22 @@ tr:hover td {
 	font-weight: 600;
 }
 
+/* Ops-overview heartbeat/ingest status pills (admin panel only). */
+.pill.hb-ok {
+	color: var(--success);
+}
+.pill.hb-stale {
+	color: var(--accent);
+	font-weight: 600;
+}
+.pill.hb-down {
+	color: var(--danger);
+	font-weight: 600;
+}
+.pill.hb-unknown {
+	color: var(--text-dim);
+}
+
 .pill-link {
 	background: none;
 	border: none;

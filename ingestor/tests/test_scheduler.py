@@ -524,6 +524,7 @@ class TestPollCycle(unittest.TestCase):
             "outstanding": patch("scheduler.outstanding_dates",
                                  return_value=missing or {"amateur": set()}),
             "job": patch("scheduler.run_daily_job", return_value=summary or {}),
+            "heartbeat": patch("scheduler.record_heartbeat"),
         }
         started = {n: p.start() for n, p in patches.items()}
         for p in patches.values():
@@ -541,6 +542,8 @@ class TestPollCycle(unittest.TestCase):
 
         self.assertEqual(result, {})
         m["job"].assert_not_called()
+        m["heartbeat"].assert_called_once()
+        self.assertEqual(m["heartbeat"].call_args.args[1], "ingestor-poll")
 
     def test_outstanding_day_triggers_ingest_even_when_listing_is_unchanged(self):
         """The listing is a static file observed lagging real publication by
@@ -600,3 +603,51 @@ class TestPollCycle(unittest.TestCase):
             scheduler.run_poll_cycle(state=self.state, services=["amateur"])
         except Exception as exc:  # pragma: no cover - the assertion is the point
             self.fail(f"run_poll_cycle raised {exc!r} instead of backing off")
+
+    def test_heartbeat_is_recorded_on_the_backoff_skip_path(self):
+        """A poll that is skipped entirely due to backoff must still record
+        a heartbeat -- otherwise a long backoff would look identical to a
+        dead loop in service_heartbeats."""
+        m = self._patch(listing=None)
+        self.state.skip_polls_remaining = 3
+
+        scheduler.run_poll_cycle(state=self.state, services=["amateur"])
+
+        m["job"].assert_not_called()
+        m["heartbeat"].assert_called_once()
+        detail = m["heartbeat"].call_args.kwargs["detail"]
+        self.assertEqual(detail["skip_polls_remaining"], 3)
+
+    def test_heartbeat_is_recorded_on_the_normal_work_path(self):
+        """A poll that actually ingests something still records exactly one
+        heartbeat, up front, distinct from ingestion succeeding or failing."""
+        m = self._patch(listing=None, missing={"amateur": {"sun"}})
+        self.state.last_full_sweep = datetime.datetime.now(datetime.timezone.utc)
+
+        scheduler.run_poll_cycle(state=self.state, services=["amateur"])
+
+        m["job"].assert_called_once()
+        m["heartbeat"].assert_called_once()
+
+    def test_heartbeat_is_recorded_even_when_the_poll_cycle_fails(self):
+        """The heartbeat write happens before the network/DB work that can
+        fail, so an FCC or database outage still leaves a fresh heartbeat --
+        it is proof the loop is alive, not that the cycle succeeded."""
+        m = self._patch(listing=None)
+        self.state.last_full_sweep = datetime.datetime.now(datetime.timezone.utc)
+        m["fetch"].side_effect = RuntimeError("FCC unreachable")
+
+        scheduler.run_poll_cycle(state=self.state, services=["amateur"])
+
+        m["heartbeat"].assert_called_once()
+
+    def test_a_failing_heartbeat_write_does_not_break_the_poll(self):
+        """Heartbeat recording is best-effort observability; it must never
+        take down the actual poll cycle it is instrumenting."""
+        m = self._patch(listing=None)
+        self.state.last_full_sweep = datetime.datetime.now(datetime.timezone.utc)
+        m["heartbeat"].side_effect = RuntimeError("heartbeat db down")
+
+        result = scheduler.run_poll_cycle(state=self.state, services=["amateur"])
+
+        self.assertEqual(result, {})

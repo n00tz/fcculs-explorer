@@ -693,9 +693,23 @@ def main():
         assert resp.status_code == 204, resp.text
         print("admin user delete OK")
 
+        resp = client.get("/api/admin/ops-summary")
+        assert resp.status_code == 200, resp.text
+        ops = resp.json()
+        assert {s["service"] for s in ops["ingest"]["services"]} == {
+            "amateur", "tower", "gmrs", "aircraft", "ship",
+        }
+        assert ops["ingest"]["heartbeat_state"] in ("ok", "stale", "down", "unknown")
+        assert "note" in ops["new_hams"]
+        assert set(ops["signups"]) >= {"last_24h", "last_7_days", "most_recent_at"}
+        assert ops["notifications"]["dispatch_heartbeat_state"] in ("ok", "stale", "down", "unknown")
+        print("admin ops-summary OK:", ops["ingest"]["heartbeat_state"], ops["notifications"]["dispatch_heartbeat_state"])
+
         resp = client.post("/api/admin/logout")
         assert resp.status_code == 200, resp.text
         resp = client.get("/api/admin/users")
+        assert resp.status_code == 401
+        resp = client.get("/api/admin/ops-summary")
         assert resp.status_code == 401
         print("admin auth-required enforcement OK")
 

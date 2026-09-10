@@ -9,7 +9,7 @@ from redis import Redis
 from rq import Queue, Retry
 
 from .config import settings
-from .db import get_connection
+from .db import get_connection, record_heartbeat
 from .jobs import send_delivery
 from .matcher import match_and_record
 
@@ -25,16 +25,34 @@ def run_once() -> int:
     finally:
         conn.close()
 
-    if not new_delivery_ids:
-        return 0
+    enqueued = 0
+    if new_delivery_ids:
+        redis_conn = Redis.from_url(settings.redis_url)
+        queue = Queue(settings.queue_name, connection=redis_conn)
+        for delivery_id in new_delivery_ids:
+            queue.enqueue(send_delivery, delivery_id, retry=Retry(max=3, interval=[30, 120, 600]))
+        logger.info("enqueued %d new notification deliveries", len(new_delivery_ids))
+        enqueued = len(new_delivery_ids)
 
-    redis_conn = Redis.from_url(settings.redis_url)
-    queue = Queue(settings.queue_name, connection=redis_conn)
-    for delivery_id in new_delivery_ids:
-        queue.enqueue(send_delivery, delivery_id, retry=Retry(max=3, interval=[30, 120, 600]))
+    # Recorded unconditionally -- whether or not anything was enqueued --
+    # so a stale row in service_heartbeats can only mean this loop stopped
+    # running, never "ran but had nothing new to send". See
+    # db/011_ops_heartbeats.sql.
+    _record_db_heartbeat(enqueued)
 
-    logger.info("enqueued %d new notification deliveries", len(new_delivery_ids))
-    return len(new_delivery_ids)
+    return enqueued
+
+
+def _record_db_heartbeat(enqueued: int) -> None:
+    try:
+        conn = get_connection()
+        try:
+            record_heartbeat(conn, "notifier-dispatch", detail={"enqueued": enqueued})
+        finally:
+            conn.close()
+    except Exception:
+        # Heartbeat recording must never break the actual dispatch cycle.
+        logger.warning("failed to record notifier-dispatch heartbeat", exc_info=True)
 
 
 if __name__ == "__main__":

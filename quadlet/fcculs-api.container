@@ -27,6 +27,11 @@ Environment=FCCULS_SMTP_USER=%SMTP_USER%
 Environment=FCCULS_SMTP_PASSWORD=%SMTP_PASSWORD%
 Environment=FCCULS_SMTP_USE_TLS=%SMTP_USE_TLS%
 Environment=FCCULS_SMTP_FROM_ADDRESS=%SMTP_FROM_ADDRESS%
+# Not consumed by the API's own request handling -- read-only, so the admin
+# ops-summary endpoint's heartbeat-staleness thresholds track the real
+# ingestor/notifier deploy cadence instead of a hardcoded guess.
+Environment=FCCULS_INGEST_POLL_MINUTES=%INGEST_POLL_MINUTES%
+Environment=FCCULS_DISPATCH_INTERVAL_SECONDS=%DISPATCH_INTERVAL_SECONDS%
 
 [Service]
 Restart=always

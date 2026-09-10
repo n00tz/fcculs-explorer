@@ -578,6 +578,33 @@ Check `podman logs mcp` (or `journalctl --user -u fcculs-mcp.service`)
 when diagnosing — the server logs every upstream API call it makes.
 
 
+## Admin Panel
+
+A hidden, unlinked `/admin` route provides the single-operator surface
+this project needs at this stage: user/watch CRUD (no rich data-editing
+UI is planned for early versions — see `docs/plan.md`) and an **Overview**
+tab that answers, at a glance, whether the system is actually working:
+
+- **Ingest & polling** — a heartbeat for the ingestor's poll loop
+  (recorded every cycle, whether or not there was anything to ingest),
+  plus each service's last successfully ingested data date/row counts.
+- **New Hams / change activity** — 7-day count and last grant date, with
+  an inline note that a quiet stretch is normal on weekends/holidays and
+  to check the ingest heartbeat above rather than assume something is
+  broken.
+- **Signups** — 24h/7-day new-user counts.
+- **Notifications** — the notifier's dispatch-loop heartbeat, plus
+  pending/sent/failed delivery counts and the most recent failure.
+
+The heartbeat mechanism (`service_heartbeats` table,
+`db/011_ops_heartbeats.sql`) exists specifically so "the loop stopped
+running" and "the loop ran but found nothing new" are distinguishable
+from the database alone — see `docs/plan.md`'s progress log for the
+investigation that motivated it. Auth is the same single process-wide
+superuser password described for `/api/admin/*` above; there's no
+separate ops-only role.
+
+
 ## Configuration Reference (`.env`)
 
 | Variable | Used by | Purpose |

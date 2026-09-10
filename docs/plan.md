@@ -3450,3 +3450,86 @@ to build on top of from a fresh clone.
 
 Files touched: `ingestor/db.py`, `ingestor/scheduler.py`,
 `ingestor/tests/test_scheduler.py`, `docs/plan.md` (this entry).
+
+## 13. Admin Panel: Operations-at-a-Glance Overview (BUILT)
+
+Motivated directly by the investigation in the Progress Log entry above:
+diagnosing "why no New Hams since 09-05" required a from-scratch DB/log
+investigation because there was no way to tell "the poller silently
+died" apart from "FCC's file was genuinely quiet" just by looking at the
+admin panel. This feature closes that gap.
+
+**Key design decision:** `ingest_runs`/`complete_dumps` only get a new
+row when there's something to record, so recency there can't prove the
+loop is *alive* -- only that it *found something*. The fix is a
+lightweight heartbeat, one row per loop, upserted **every cycle
+regardless of outcome** (including a steady-state no-op poll and a
+backoff-skip poll) -- see `db/011_ops_heartbeats.sql`'s
+`service_heartbeats` table. Heartbeat staleness alone then proves the
+loop stopped running.
+
+**Built:**
+- `db/011_ops_heartbeats.sql` -- generic `service_heartbeats(service PK,
+  last_run_at, detail JSONB, updated_at)`, reusable by any future loop.
+- `ingestor/db.py`'s `record_heartbeat()` + an unconditional call at the
+  very top of `run_poll_cycle()` in `ingestor/scheduler.py`, before its
+  backoff-skip/steady-state/normal-work/failure branches, recording
+  `consecutive_failures`, `skip_polls_remaining`, `due_for_sweep`. Best-
+  effort: a heartbeat write failure is caught and logged, never allowed
+  to break the actual poll.
+- `notifier/app/db.py`'s `record_heartbeat()` + an unconditional call at
+  the end of `dispatch.run_once()`, recording `{"enqueued": n}` whether
+  or not anything was enqueued. Same best-effort guarantee.
+- `GET /api/admin/ops-summary` (`api/app/routers/admin.py`), gated by the
+  existing `get_current_admin` dependency (no new auth model): both
+  heartbeats' age + `ok`/`stale`/`down`/`unknown` classification (using
+  multiples of `INGEST_POLL_MINUTES`/`DISPATCH_INTERVAL_SECONDS`, newly
+  exposed as read-only `api/app/config.py` settings and wired into the
+  `api` container's env in both `compose.yaml` and
+  `quadlet/fcculs-api.container`), per-service last-ingested status,
+  7-day New Hams count/last grant date with an explanatory note, 24h/7d
+  signup counts, and notification pending/sent/failed counts + last
+  failure.
+- A new default-shown **Overview** tab in
+  `web/src/routes/admin/+page.svelte` (ahead of the existing Users/
+  Watches tabs), four small cards reusing existing `.card`/`.pill`/
+  `.muted`/`.callout` CSS plus four new `.pill.hb-*` status color
+  variants in `web/src/app.css` -- no new visual system, no charts, no
+  client-side auto-refresh in v1.
+- `docs/architecture.md` §3c documents the heartbeat mechanism and adds
+  `service_heartbeats` to the schema ERD; README gets a new "Admin Panel"
+  section.
+
+**Explicitly out of scope (per the original ask):** no alerting on
+staleness (visibility only, for a human to notice); no change to actual
+ingest/dispatch behavior (heartbeat writes are additive/observability-
+only); no new auth mechanism.
+
+**Tested:** `ingestor/tests/test_scheduler.py` gained 5 tests (heartbeat
+recorded on the steady-state, backoff-skip, and normal-work paths, plus
+a failing-heartbeat-write doesn't break the poll) -- 55/55 ingestor
+mocked tests pass. `notifier/tests/test_dispatch.py` is new (3 tests:
+heartbeat recorded whether or not anything is enqueued, and a failing
+write doesn't break dispatch) -- 29/29 notifier mocked tests pass.
+`api/tests/test_ops_summary.py` is new (4 tests covering the
+`ok`/`stale`/`down`/`unknown` boundary math) -- all pass alongside the
+existing 41 mocked api tests (the pre-existing `test_ratelimit.py`
+failures seen when Redis isn't reachable are unrelated to this change).
+`api/tests/integration_test.py` gained an ops-summary assertion block
+(all five services present, heartbeat states well-formed, signup/
+notification keys present) and passed end-to-end against a real
+disposable Postgres/Redis pod via `api/tests/run_integration.sh`,
+observing `heartbeat_state: "unknown"` for a fresh test DB with no
+heartbeat rows yet -- exactly the intended behavior. `web`'s
+`npm run build` succeeds cleanly with the new Overview tab.
+
+Files touched: `db/011_ops_heartbeats.sql` (new), `ingestor/db.py`,
+`ingestor/scheduler.py`, `ingestor/tests/test_scheduler.py`,
+`notifier/app/db.py`, `notifier/app/dispatch.py`,
+`notifier/tests/test_dispatch.py` (new), `api/app/config.py`,
+`api/app/routers/admin.py`, `api/tests/test_ops_summary.py` (new),
+`api/tests/integration_test.py`, `compose.yaml`,
+`quadlet/fcculs-api.container`, `web/src/routes/admin/+page.svelte`,
+`web/src/app.css`, `README.md`, `docs/architecture.md`, `docs/plan.md`
+(this entry).
+

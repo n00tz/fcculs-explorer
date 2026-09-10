@@ -12,7 +12,11 @@
 	let password = '';
 	let loginError = '';
 
-	let tab = 'users';
+	let tab = 'overview';
+
+	let ops = null;
+	let opsError = '';
+	let opsLoading = false;
 
 	let users = [];
 	let usersTotal = 0;
@@ -34,6 +38,7 @@
 		try {
 			await get('/admin/me');
 			authed = true;
+			await loadOps();
 			await loadUsers();
 			await loadWatches();
 		} catch (e) {
@@ -49,6 +54,7 @@
 			await post('/admin/login', { password });
 			password = '';
 			authed = true;
+			await loadOps();
 			await loadUsers();
 			await loadWatches();
 		} catch (e) {
@@ -59,6 +65,27 @@
 	async function logoutAdmin() {
 		await post('/admin/logout');
 		authed = false;
+	}
+
+	async function loadOps() {
+		opsLoading = true;
+		opsError = '';
+		try {
+			ops = await get('/admin/ops-summary');
+		} catch (e) {
+			opsError = e.message;
+		} finally {
+			opsLoading = false;
+		}
+	}
+
+	// Rough "how long ago" formatter -- this panel is for a human glancing
+	// at freshness, not a precise duration display.
+	function ageLabel(seconds) {
+		if (seconds == null) return 'never recorded';
+		if (seconds < 90) return `${Math.round(seconds)}s ago`;
+		if (seconds < 60 * 90) return `${Math.round(seconds / 60)}m ago`;
+		return `${Math.round(seconds / 3600)}h ago`;
 	}
 
 	async function loadUsers() {
@@ -199,11 +226,88 @@
 	{#if error}<p class="error">{error}</p>{/if}
 
 	<div class="filters">
+		<button class:secondary={tab !== 'overview'} on:click={() => (tab = 'overview')}>Overview</button>
 		<button class:secondary={tab !== 'users'} on:click={() => (tab = 'users')}>Users</button>
 		<button class:secondary={tab !== 'watches'} on:click={() => (tab = 'watches')}>Watches</button>
 	</div>
 
-	{#if tab === 'users'}
+	{#if tab === 'overview'}
+		<h2>Operations at a glance</h2>
+		<p class="muted">
+			A quick "is everything still running" check -- not a replacement for logs. Refresh the page
+			to update.
+		</p>
+		{#if opsLoading && !ops}
+			<p class="muted">Loading…</p>
+		{:else if opsError}
+			<p class="error">{opsError}</p>
+		{:else if ops}
+			<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
+				<div class="card">
+					<h3 style="margin-top: 0;">Ingest &amp; polling</h3>
+					<p>
+						Poller loop:
+						<span class="pill hb-{ops.ingest.heartbeat_state}">{ops.ingest.heartbeat_state}</span>
+						<span class="muted">({ageLabel(ops.ingest.heartbeat_age_seconds)})</span>
+					</p>
+					<table>
+						<thead>
+							<tr><th>Service</th><th>Last data date</th><th>Last ingested</th><th>Status</th></tr>
+						</thead>
+						<tbody>
+							{#each ops.ingest.services as s}
+								<tr>
+									<td>{s.service}</td>
+									<td>{s.last_data_date ?? '—'}</td>
+									<td>{s.last_ingested_at ?? '—'}</td>
+									<td>
+										{#if s.status}
+											<span class="pill hb-{s.status === 'success' ? 'ok' : 'stale'}">{s.status}</span>
+										{:else}
+											<span class="pill hb-unknown">none yet</span>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				<div class="card">
+					<h3 style="margin-top: 0;">New Hams / change activity</h3>
+					<p>Last 7 days: <strong>{ops.new_hams.last_7_days}</strong></p>
+					<p class="muted">Last grant date: {ops.new_hams.last_grant_date ?? '—'}</p>
+					<div class="callout">{ops.new_hams.note}</div>
+				</div>
+
+				<div class="card">
+					<h3 style="margin-top: 0;">Signups</h3>
+					<p>Last 24h: <strong>{ops.signups.last_24h}</strong> · Last 7 days: <strong>{ops.signups.last_7_days}</strong></p>
+					<p class="muted">Most recent: {ops.signups.most_recent_at ?? '—'}</p>
+				</div>
+
+				<div class="card">
+					<h3 style="margin-top: 0;">Notifications</h3>
+					<p>
+						Dispatch loop:
+						<span class="pill hb-{ops.notifications.dispatch_heartbeat_state}">{ops.notifications.dispatch_heartbeat_state}</span>
+						<span class="muted">({ageLabel(ops.notifications.dispatch_heartbeat_age_seconds)})</span>
+					</p>
+					<p>
+						Pending: <strong>{ops.notifications.pending}</strong> ·
+						Sent (24h): <strong>{ops.notifications.sent_last_24h}</strong> ·
+						Failed (24h): <strong>{ops.notifications.failed_last_24h}</strong>
+					</p>
+					<p class="muted">Last sent: {ops.notifications.last_sent_at ?? '—'}</p>
+					{#if ops.notifications.last_failure}
+						<div class="callout">
+							Last failure ({ops.notifications.last_failure.created_at}): {ops.notifications.last_failure.last_error}
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/if}
+	{:else if tab === 'users'}
 		<h2>Users</h2>
 		<div class="card">
 			<table>

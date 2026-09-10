@@ -10,6 +10,8 @@ via .env. This is a deliberately narrow, low-ceremony superuser mechanism
 appropriate for a single-operator self-hosted deployment, not a
 multi-admin RBAC system.
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from psycopg import AsyncConnection
 from pydantic import BaseModel
@@ -23,6 +25,11 @@ from ..ratelimit import enforce_rate_limit
 from ..security import create_admin_session_cookie
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+# Canonical service list (mirrors ingestor/schemas.py's SERVICES and
+# watches.py's ALLOWED_SERVICES) so the ops-summary endpoint always reports
+# a row for every service, even one that has never successfully ingested.
+OPS_SERVICES = ["amateur", "tower", "gmrs", "aircraft", "ship"]
 
 
 class AdminLoginBody(BaseModel):
@@ -248,3 +255,172 @@ async def delete_watch_admin(
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Watch not found")
     await conn.commit()
+
+
+# --- Operations-at-a-glance overview ----------------------------------------
+#
+# Motivated by a real false alarm: because ingest_runs only gets a new row
+# when there's actually something to ingest, a genuinely quiet FCC
+# publishing period and a silently dead poller loop are indistinguishable
+# from the database alone -- diagnosing that gap required a from-scratch
+# log/DB investigation. This endpoint answers, in one round trip, whether
+# each moving part (poller, ingestion, signups, notifications) is still
+# operating, using heartbeats (db/011_ops_heartbeats.sql) recorded
+# unconditionally by the ingestor/notifier loops every cycle, so heartbeat
+# staleness alone means "the loop stopped", distinct from "found nothing
+# to do".
+
+def _heartbeat_state(age_seconds: float | None, ok_seconds: float, stale_seconds: float) -> str:
+    """Classify heartbeat age into ok/stale/down/unknown.
+
+    `unknown` (never recorded, e.g. right after a fresh migration/first
+    deploy before the loop has ticked once) is deliberately distinct from
+    `down` (was recording, has since gone silent) -- the former isn't
+    evidence of a problem.
+    """
+    if age_seconds is None:
+        return "unknown"
+    if age_seconds <= ok_seconds:
+        return "ok"
+    if age_seconds <= stale_seconds:
+        return "stale"
+    return "down"
+
+
+@router.get("/ops-summary")
+async def ops_summary(
+    _: None = Depends(get_current_admin),
+    conn: AsyncConnection = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+
+    async with conn.cursor() as cur:
+        # --- Heartbeats -----------------------------------------------------
+        await cur.execute(
+            "SELECT service, last_run_at, detail FROM service_heartbeats "
+            "WHERE service IN ('ingestor-poll', 'notifier-dispatch')"
+        )
+        heartbeats = {r["service"]: r async for r in cur}
+
+        def hb_age_seconds(service: str) -> float | None:
+            row = heartbeats.get(service)
+            if row is None:
+                return None
+            return (now - row["last_run_at"]).total_seconds()
+
+        ingest_hb_age = hb_age_seconds("ingestor-poll")
+        dispatch_hb_age = hb_age_seconds("notifier-dispatch")
+
+        ingest_poll_seconds = settings.ingest_poll_minutes * 60
+        ingest_state = _heartbeat_state(ingest_hb_age, ingest_poll_seconds * 3, ingest_poll_seconds * 12)
+        dispatch_state = _heartbeat_state(
+            dispatch_hb_age, settings.dispatch_interval_seconds * 5, settings.dispatch_interval_seconds * 12
+        )
+
+        # --- Per-service ingest status ---------------------------------------
+        await cur.execute(
+            """
+            SELECT DISTINCT ON (service)
+                service, data_date, ingested_at, status, rows_ingested, changes_recorded
+            FROM ingest_runs
+            ORDER BY service, data_date DESC
+            """
+        )
+        latest_by_service = {r["service"]: r async for r in cur}
+        ingest_services = []
+        for service in OPS_SERVICES:
+            row = latest_by_service.get(service)
+            ingest_services.append({
+                "service": service,
+                "last_data_date": row["data_date"] if row else None,
+                "last_ingested_at": row["ingested_at"] if row else None,
+                "status": row["status"] if row else None,
+                "rows_ingested": row["rows_ingested"] if row else None,
+                "changes_recorded": row["changes_recorded"] if row else None,
+            })
+
+        # --- New Hams / change activity ---------------------------------------
+        await cur.execute(
+            """
+            SELECT count(*) AS c, max(effective_date) AS last_date
+            FROM change_events
+            WHERE is_new_operator AND effective_date >= (%(now)s::date - INTERVAL '7 days')
+            """,
+            {"now": now},
+        )
+        new_hams = await cur.fetchone()
+
+        # --- Signups -----------------------------------------------------------
+        await cur.execute(
+            """
+            SELECT
+                count(*) FILTER (WHERE created_at >= %(now)s - INTERVAL '24 hours') AS last_24h,
+                count(*) FILTER (WHERE created_at >= %(now)s - INTERVAL '7 days') AS last_7_days,
+                max(created_at) AS most_recent_at
+            FROM users
+            """,
+            {"now": now},
+        )
+        signups = await cur.fetchone()
+
+        # --- Notifications -------------------------------------------------------
+        await cur.execute(
+            """
+            SELECT
+                count(*) FILTER (WHERE status = 'pending') AS pending,
+                count(*) FILTER (WHERE status = 'sent' AND sent_at >= %(now)s - INTERVAL '24 hours') AS sent_last_24h,
+                count(*) FILTER (WHERE status = 'failed' AND created_at >= %(now)s - INTERVAL '24 hours') AS failed_last_24h,
+                max(sent_at) FILTER (WHERE status = 'sent') AS last_sent_at
+            FROM notification_deliveries
+            """,
+            {"now": now},
+        )
+        notifications = await cur.fetchone()
+
+        await cur.execute(
+            "SELECT last_error, created_at FROM notification_deliveries "
+            "WHERE status = 'failed' ORDER BY created_at DESC LIMIT 1"
+        )
+        last_failure = await cur.fetchone()
+
+        # --- Complete dumps ----------------------------------------------------
+        await cur.execute(
+            "SELECT service, filename, published_at FROM complete_dumps ORDER BY service"
+        )
+        complete_dumps = [r async for r in cur]
+
+    return {
+        "generated_at": now,
+        "ingest": {
+            "heartbeat_at": heartbeats.get("ingestor-poll", {}).get("last_run_at"),
+            "heartbeat_age_seconds": ingest_hb_age,
+            "heartbeat_state": ingest_state,
+            "heartbeat_detail": heartbeats.get("ingestor-poll", {}).get("detail"),
+            "services": ingest_services,
+        },
+        "new_hams": {
+            "last_7_days": new_hams["c"],
+            "last_grant_date": new_hams["last_date"],
+            "note": (
+                "A quiet stretch here is normal on weekends/holidays -- check "
+                "the ingest heartbeat above for whether files are actually "
+                "being processed."
+            ),
+        },
+        "signups": {
+            "last_24h": signups["last_24h"],
+            "last_7_days": signups["last_7_days"],
+            "most_recent_at": signups["most_recent_at"],
+        },
+        "notifications": {
+            "dispatch_heartbeat_at": heartbeats.get("notifier-dispatch", {}).get("last_run_at"),
+            "dispatch_heartbeat_age_seconds": dispatch_hb_age,
+            "dispatch_heartbeat_state": dispatch_state,
+            "pending": notifications["pending"],
+            "sent_last_24h": notifications["sent_last_24h"],
+            "failed_last_24h": notifications["failed_last_24h"],
+            "last_sent_at": notifications["last_sent_at"],
+            "last_failure": last_failure,
+        },
+        "complete_dumps": complete_dumps,
+    }

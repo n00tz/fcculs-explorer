@@ -298,6 +298,33 @@ flowchart TD
 | **Partial-failure safe** | Each day gets its own temp dir and its own `ingest_runs` row, so a failure mid-catch-up keeps every earlier day recorded. |
 | **Ordered** | Oldest-first means multi-day catch-ups apply chronologically, so diffs are computed against the correct prior state. |
 
+### 3c. Operational heartbeats
+
+`ingest_runs` and `complete_dumps` only get a new row when there's
+actually something to record — so a genuinely quiet FCC publishing
+period (an empty weekend daily file, entirely normal) and a silently
+dead poller loop are otherwise indistinguishable from the database
+alone. `service_heartbeats` (`db/011_ops_heartbeats.sql`) closes that
+gap: one row per background loop, upserted **unconditionally on every
+cycle** regardless of outcome —
+
+- `ingestor-poll`, written at the very top of `run_poll_cycle()`, before
+  any of its exit paths (backoff-skip, steady-state 304/nothing-
+  outstanding, normal ingest, or failure).
+- `notifier-dispatch`, written at the end of `dispatch.run_once()`,
+  whether or not any deliveries were enqueued.
+
+Because the write happens unconditionally, heartbeat *staleness* alone
+proves the loop itself stopped running — a distinct and more urgent
+condition than "ran, but found nothing new." The admin panel's Overview
+tab (`GET /api/admin/ops-summary`) surfaces both heartbeats' age
+alongside per-service ingest status, new-hams activity, signups, and
+notification delivery counts, classifying each heartbeat as `ok` /
+`stale` / `down` / `unknown` using multiples of the loop's own configured
+interval (`INGEST_POLL_MINUTES`, `DISPATCH_INTERVAL_SECONDS`) — see the
+README's "Admin Panel" section.
+
+
 > **Hard limit:** FCC keeps only 7 rotating files. A gap longer than that
 > is **unrecoverable from the daily feed** — it needs a fresh
 > `--bootstrap`. See [§14](#14-operational-runbook).
@@ -800,6 +827,12 @@ erDiagram
         int rows_ingested
         int changes_recorded
         text status
+    }
+
+    service_heartbeats {
+        text service PK "ingestor-poll | notifier-dispatch"
+        timestamptz last_run_at "upserted every cycle, any outcome"
+        jsonb detail "small free-form status blob"
     }
 
     change_events {

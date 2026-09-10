@@ -101,5 +101,14 @@ class Settings(BaseSettings):
     rate_limit_test_send_max: int = 10
     rate_limit_test_send_window_seconds: int = 60 * 60  # 1 hour
 
+    # Read-only visibility into the ingestor/notifier loops' own cadence, so
+    # the admin ops-summary endpoint's heartbeat-staleness thresholds track
+    # real deploy config instead of hardcoding a guess (see
+    # ingestor/scheduler.py's POLL_MINUTES / notifier's
+    # fcculs-notifier-dispatch.container sleep loop for where these same
+    # env vars are actually consumed).
+    ingest_poll_minutes: int = 15
+    dispatch_interval_seconds: int = 60
+
 
 settings = Settings()

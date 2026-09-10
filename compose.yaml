@@ -82,6 +82,11 @@ services:
       FCCULS_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       FCCULS_SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
       FCCULS_SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-no-reply@fcculs-explorer.example}
+      # Not consumed by the ingestor/notifier processes themselves here --
+      # read-only, so the admin ops-summary endpoint's heartbeat-staleness
+      # thresholds track the real deploy cadence instead of a hardcoded guess.
+      FCCULS_INGEST_POLL_MINUTES: ${INGEST_POLL_MINUTES:-15}
+      FCCULS_DISPATCH_INTERVAL_SECONDS: ${DISPATCH_INTERVAL_SECONDS:-60}
 
   ingestor:
     build: ./ingestor
