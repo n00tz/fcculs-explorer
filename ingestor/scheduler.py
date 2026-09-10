@@ -73,6 +73,7 @@ import index_scraper
 from db import (
     ingest_advisory_lock,
     ingested_data_dates,
+    ingested_last_modified,
     latest_complete_dumps,
     record_complete_dump,
     record_ingest_run,
@@ -248,14 +249,39 @@ def run_daily_job(run_date: date | None = None, max_days: int | None = None,
                     continue
 
                 done = ingested_data_dates(conn, service, earliest)
-                pending = [
-                    (dow, data_date, last_modified)
-                    for dow, data_date, last_modified in available
-                    # An undateable file (data_date None) is always a
-                    # candidate: whether it has already been ingested can
-                    # only be decided once its `counts` member dates it.
-                    if data_date is None or (data_date >= earliest and data_date not in done)
-                ]
+                done_last_modified = ingested_last_modified(conn, service, earliest)
+                republished = set()
+                pending = []
+                for dow, data_date, last_modified in available:
+                    if data_date is None:
+                        # An undateable file is always a candidate: whether
+                        # it has already been ingested can only be decided
+                        # once its `counts` member dates it.
+                        pending.append((dow, data_date, last_modified))
+                        continue
+                    if data_date < earliest:
+                        continue
+                    if data_date not in done:
+                        pending.append((dow, data_date, last_modified))
+                        continue
+                    # Already recorded as ingested -- but FCC's weekday-named
+                    # files rotate in place, so "done" only means "done as of
+                    # the version we last saw". If the file's Last-Modified
+                    # has moved on since then, FCC has republished this same
+                    # calendar date with different/fuller content (the
+                    # documented high-latency/republish behaviour) and it
+                    # must be re-ingested. Re-ingestion is safe: ingestion is
+                    # upsert-based and diffs against whatever is currently
+                    # stored, so this can never duplicate change_events.
+                    prior_last_modified = done_last_modified.get(data_date)
+                    if (
+                        last_modified is not None
+                        and prior_last_modified is not None
+                        and last_modified > prior_last_modified
+                    ):
+                        republished.add(data_date)
+                        pending.append((dow, data_date, last_modified))
+
                 if not pending:
                     logger.info(
                         "%s: nothing to do -- all %d available day(s) already ingested",
@@ -266,7 +292,10 @@ def run_daily_job(run_date: date | None = None, max_days: int | None = None,
                 logger.info(
                     "%s: %d day(s) to ingest: %s",
                     service, len(pending),
-                    ", ".join(str(d) if d else "<undated>" for _, d, _ in pending),
+                    ", ".join(
+                        f"{d} (republished)" if d in republished else (str(d) if d else "<undated>")
+                        for _, d, _ in pending
+                    ),
                 )
 
                 for dow, data_date, last_modified in pending:

@@ -143,6 +143,7 @@ class TestRunDailyJobCatchUp(unittest.TestCase):
             "connect": patch("scheduler.psycopg.connect"),
             "discover": patch("scheduler.discover_available_days"),
             "ingested": patch("scheduler.ingested_data_dates"),
+            "ingested_lm": patch("scheduler.ingested_last_modified"),
             "record": patch("scheduler.record_ingest_run"),
             "download": patch("scheduler.download_daily"),
             "extract": patch("scheduler.extract_zip"),
@@ -165,6 +166,7 @@ class TestRunDailyJobCatchUp(unittest.TestCase):
         # Tests that care about the check set this explicitly.
         started["counts"].return_value = parser.ArchiveCounts(rows={}, created_at=None)
         started["lock"].side_effect = lambda conn: _fake_lock(True)
+        started["ingested_lm"].return_value = {}
         return started
 
     def test_ingests_only_days_not_already_recorded_oldest_first(self):
@@ -254,6 +256,63 @@ class TestRunDailyJobCatchUp(unittest.TestCase):
         self.assertEqual(call.kwargs["last_modified"], _utc(2026, 9, 6))
         # sha256 of the downloaded bytes, so a re-published file is detectable.
         self.assertEqual(len(call.kwargs["content_sha256"]), 64)
+
+
+class TestRepublishedFileIsReingested(TestRunDailyJobCatchUp):
+    """FCC's weekday-named files rotate in place. A date already marked
+    'success' must not be treated as permanently settled: if FCC republishes
+    that same weekday's archive later with a newer Last-Modified, it has to
+    be re-ingested, not silently ignored forever."""
+
+    def test_newer_last_modified_on_an_already_done_day_triggers_reingest(self):
+        m = self._patch_common()
+        m["discover"].return_value = [
+            ("tue", datetime.date(2026, 9, 8), _utc(2026, 9, 9, 14, 0)),
+        ]
+        m["ingested"].return_value = {datetime.date(2026, 9, 8)}
+        # We ingested this day earlier today from an 08:00 UTC publish; FCC
+        # has since republished it with more content at 14:00 UTC.
+        m["ingested_lm"].return_value = {datetime.date(2026, 9, 8): _utc(2026, 9, 9, 8, 0)}
+
+        result = scheduler.run_daily_job(run_date=datetime.date(2026, 9, 9),
+                                         services=["amateur"])
+
+        m["download"].assert_called_once()
+        m["record"].assert_called_once()
+        self.assertEqual(m["record"].call_args.kwargs["data_date"], datetime.date(2026, 9, 8))
+        self.assertNotEqual(result, {})
+
+    def test_same_or_older_last_modified_on_an_already_done_day_is_left_alone(self):
+        m = self._patch_common()
+        m["discover"].return_value = [
+            ("tue", datetime.date(2026, 9, 8), _utc(2026, 9, 9, 8, 0)),
+        ]
+        m["ingested"].return_value = {datetime.date(2026, 9, 8)}
+        m["ingested_lm"].return_value = {datetime.date(2026, 9, 8): _utc(2026, 9, 9, 8, 0)}
+
+        result = scheduler.run_daily_job(run_date=datetime.date(2026, 9, 9),
+                                         services=["amateur"])
+
+        m["download"].assert_not_called()
+        m["record"].assert_not_called()
+        self.assertEqual(result, {})
+
+    def test_missing_prior_last_modified_does_not_force_a_reingest(self):
+        """Old ingest_runs rows recorded before this field was tracked (or
+        with a NULL Last-Modified) must not be reinterpreted as 'always
+        stale' -- there is nothing to compare against, so leave them done."""
+        m = self._patch_common()
+        m["discover"].return_value = [
+            ("tue", datetime.date(2026, 9, 8), _utc(2026, 9, 9, 8, 0)),
+        ]
+        m["ingested"].return_value = {datetime.date(2026, 9, 8)}
+        m["ingested_lm"].return_value = {}  # nothing recorded for this date
+
+        result = scheduler.run_daily_job(run_date=datetime.date(2026, 9, 9),
+                                         services=["amateur"])
+
+        m["download"].assert_not_called()
+        self.assertEqual(result, {})
 
 
 class TestResolveServices(unittest.TestCase):

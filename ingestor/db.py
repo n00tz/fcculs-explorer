@@ -161,6 +161,25 @@ def ingested_data_dates(conn: psycopg.Connection, service: str, since: date) -> 
         return {r[0] for r in cur.fetchall()}
 
 
+def ingested_last_modified(conn: psycopg.Connection, service: str, since: date) -> dict:
+    """Last-Modified we recorded for each already-successfully-ingested data
+    date, on/after `since`.
+
+    Paired with `ingested_data_dates()`: that answers "has this date been
+    ingested at all", this answers "as of what file version". FCC's
+    weekday-named files rotate in place, so a date being marked done is not
+    a guarantee that FCC will never republish that same weekday's archive
+    with different/fuller content later (see `run_daily_job`'s pending
+    filter, which uses this to detect exactly that and re-ingest)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT data_date, last_modified FROM ingest_runs "
+            "WHERE service = %s AND data_date >= %s AND status = 'success' AND last_modified IS NOT NULL",
+            (service, since),
+        )
+        return {r[0]: r[1] for r in cur.fetchall()}
+
+
 def record_ingest_run(
     conn: psycopg.Connection,
     service: str,
