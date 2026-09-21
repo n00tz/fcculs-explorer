@@ -7,6 +7,6 @@ mcp==2.2.*
 # of httpx, new distribution and import name), NOT the httpx==0.28.* used
 # by api/ and notifier/ -- the SDK requires httpx2, and shipping both HTTP
 # stacks in one image would be pointless.
-httpx2==2.12.*
+httpx2==2.13.*
 
 uvicorn[standard]==0.52.*
