@@ -1,6 +1,6 @@
 # MCP Python SDK. 2.2 removed FastMCP; the server class is now
 # mcp.server.mcpserver.MCPServer.
-mcp==2.2.*
+mcp==2.3.*
 
 # Imported directly by app/client.py, so pinned explicitly rather than
 # relied on transitively via mcp. This is httpx2 (Pydantic's continuation
