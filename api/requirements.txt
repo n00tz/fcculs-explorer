@@ -10,4 +10,4 @@ httpx==0.28.*
 redis==8.*
 rq==2.*
 pytest==9.*
-pytest-asyncio==1.4.*
+pytest-asyncio==1.5.*
