@@ -4,7 +4,7 @@
 # Directory is `mcpsrv/`, not `mcp/`, deliberately: the app runs with its
 # own directory on sys.path, so a top-level `mcp/` would shadow the `mcp`
 # SDK package and break every import.
-FROM docker.io/library/python:3.14-slim AS base
+FROM docker.io/library/python:3.15-slim AS base
 
 WORKDIR /app
 
